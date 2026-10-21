@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Suprman
+GenericName=Vim keybind and man page search
+Comment=Search Vim keybinds, tldr pages and man pages from a popup
+Exec=suprman
+Icon=system-search
+Terminal=false
+Categories=Utility;Documentation;
+Keywords=vim;keybind;keymap;man;manual;tldr;help;cheat;
+StartupNotify=false
+StartupWMClass=suprman

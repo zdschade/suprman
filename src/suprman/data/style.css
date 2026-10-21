@@ -1,0 +1,182 @@
+/*
+ * suprman stylesheet.
+ *
+ * This file is a Python string.Template: dollar-prefixed placeholders are
+ * filled in from the [appearance] section of the config (see
+ * config.build_css).  Keep all colours and sizes here so the config file stays
+ * the single source of truth.
+ */
+
+window.suprman {
+  background-color: transparent;
+  color: $foreground;
+  font-family: $font_family;
+  font-size: ${font_size}pt;
+  font-weight: $font_weight;
+  font-style: $font_style;
+}
+
+.suprman-surface {
+  background-color: $background_rgba;
+  border: 1px solid $border;
+  border-radius: ${radius}px;
+  padding: ${padding}px;
+}
+
+/* -- search bar ---------------------------------------------------------- */
+
+entry.search {
+  background-color: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 6px 2px 10px 2px;
+  font-family: $title_family;
+  font-size: ${title_size}pt;
+  font-weight: $title_weight;
+  color: $foreground;
+  caret-color: $accent;
+}
+
+entry.search > text {
+  background-color: transparent;
+  color: $foreground;
+}
+
+entry.search > text > selection {
+  background-color: $accent_soft;
+}
+
+.chip {
+  background-color: $accent_soft;
+  color: $accent;
+  border-radius: 6px;
+  padding: 3px 9px;
+  margin-top: 8px;
+  font-size: 8pt;
+  font-weight: bold;
+}
+
+/* GtkSeparator inherits the theme's bright border colour; keep it subtle. */
+separator {
+  background-color: $border;
+  min-height: 1px;
+}
+
+/* -- result list --------------------------------------------------------- */
+
+scrolledwindow,
+scrolledwindow > viewport {
+  background-color: transparent;
+}
+
+list.suprman-list {
+  background-color: transparent;
+}
+
+list.suprman-list > row.suprman-row {
+  border-radius: ${radius}px;
+  padding: 0 ${padding}px;
+  min-height: ${row_height}px;
+  border: 1px solid transparent;
+}
+
+list.suprman-list > row.suprman-row:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+list.suprman-list > row.suprman-row:selected {
+  background-color: $accent_soft;
+  border-color: $border;
+}
+
+.row-keys {
+  font-family: $key_family;
+  font-size: ${key_size}pt;
+  font-weight: $key_weight;
+  color: $accent;
+  min-width: 92px;
+}
+
+.row-desc {
+  color: $foreground;
+}
+
+.row-meta {
+  color: $muted;
+  font-size: 8.5pt;
+}
+
+.row-empty {
+  color: $muted;
+  font-style: italic;
+  padding: ${padding}px;
+}
+
+/* -- reader -------------------------------------------------------------- */
+
+.reader-title {
+  font-family: $title_family;
+  font-size: ${title_size}pt;
+  font-weight: $title_weight;
+  color: $foreground;
+}
+
+.reader-subtitle {
+  color: $muted;
+  font-size: 8.5pt;
+
+}
+
+.reader-body,
+.reader-body > text {
+  background-color: transparent;
+  color: $foreground;
+  font-family: $key_family;
+  font-size: ${key_size}pt;
+}
+
+.reader-body > text > selection {
+  background-color: $accent_soft;
+}
+
+.match-count {
+  color: $muted;
+  font-size: 8.5pt;
+}
+
+/* -- footer -------------------------------------------------------------- */
+
+.footer {
+  color: $muted;
+  font-size: 8.5pt;
+}
+
+/* -- chrome -------------------------------------------------------------- */
+
+scrollbar {
+  background-color: transparent;
+  border: none;
+}
+
+scrollbar slider {
+  background-color: rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+  min-width: 5px;
+  min-height: 24px;
+}
+
+scrollbar slider:hover {
+  background-color: rgba(255, 255, 255, 0.28);
+}
+
+scrollbar.vertical {
+  padding: 0 0 0 6px;
+}
+
+undershoot.top,
+undershoot.bottom,
+undershoot.left,
+undershoot.right {
+  background: none;
+}

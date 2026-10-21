@@ -1,0 +1,38 @@
+[project]
+name = "suprman"
+version = "0.1.0"
+description = "A hotkey popup for Vim keybinds, tldr pages and man pages"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "suprman contributors" }]
+keywords = ["vim", "man", "tldr", "launcher", "wayland", "gtk4"]
+classifiers = [
+  "Environment :: X11 Applications :: GTK",
+  "Intended Audience :: End Users/Desktop",
+  "Programming Language :: Python :: 3",
+  "Topic :: Utilities",
+]
+# PyGObject and the GTK4 typelib are deliberately not pip dependencies: they are
+# system packages (apt/dnf/pacman) that must match the system's GTK.  See README.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/suprman/suprman"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+# GI modules must call gi.require_version() before importing from gi.repository,
+# which makes a handful of imports deliberately "late".
+ignore = ["E402"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["RUF012"]
+
+[tool.coverage.run]
+source = ["suprman"]

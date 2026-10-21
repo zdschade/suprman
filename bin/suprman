@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""suprman launcher.
+
+Locates the Python package relative to this script, so the same file works from
+a git checkout (``bin/`` next to ``src/``) and from an installed tree
+(``<prefix>/bin/suprman`` with ``<prefix>/lib/suprman/suprman``).
+"""
+
+import os
+import sys
+from pathlib import Path
+
+HERE = Path(os.path.realpath(__file__)).parent
+
+CANDIDATES = (
+    HERE.parent / "src",  # git checkout
+    HERE.parent / "lib" / "suprman",  # PREFIX=/usr, /usr/local
+    HERE / ".." / "src",  # bin/ inside the source tree
+)
+
+for candidate in CANDIDATES:
+    candidate = candidate.resolve()
+    if (candidate / "suprman" / "__init__.py").is_file():
+        sys.path.insert(0, str(candidate))
+        break
+else:
+    sys.exit("suprman: cannot find the suprman package; reinstall or set PYTHONPATH")
+
+from suprman.app import main
+
+if __name__ == "__main__":
+    sys.exit(main())
