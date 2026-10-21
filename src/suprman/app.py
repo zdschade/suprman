@@ -10,7 +10,8 @@ import sys
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gdk, GLib, Gtk
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gdk, Gio, GLib, Gtk
 
 from . import __version__
 from . import config as config_module
@@ -28,7 +29,9 @@ class SuprmanApp(Gtk.Application):
     """A single-window application; launching again opens a new popup."""
 
     def __init__(self, cfg: Config, debug: bool = False) -> None:
-        super().__init__(application_id=APP_ID, flags=Gtk.ApplicationFlags.NON_UNIQUE)
+        # GTK4 moved the application flags to Gio; Gtk.ApplicationFlags only
+        # exists in GTK3.
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.NON_UNIQUE)
         self.config = cfg
         self.debug = debug
         self._css_loaded = False
