@@ -253,6 +253,42 @@ XWayland: `GDK_BACKEND=x11 suprman`. Under X11 there is no layer shell, so
 suprman is a normal undecorated window; use your WM's rules to hide the border
 and centre it.
 
+## Startup time
+
+The popup does as little as possible before it is on screen:
+
+- only the first 40 rows are built; the rest are created as you scroll
+  (`max_results` still caps the list)
+- the reader's TextView and text buffer are built the first time you open a
+  page, not at launch
+- `urllib` is imported only when a tldr page actually has to be downloaded
+- `make install` precompiles the modules, so even the first launch after
+  installing is not parsing source
+
+To see where the time goes on a machine where it feels slow:
+
+```sh
+SUPRMAN_TIMING=1 suprman 2>&1 | tail -12
+```
+
+That prints one line per milestone (interpreter + PyGObject imports, config,
+stylesheet, window construction, first idle after `present()`), in absolute
+milliseconds since `exec` and as a delta from the previous line. The shape of
+the output, with numbers that will differ on your machine:
+
+```
+suprman: imports done                92.4 ms  (+  92.4)
+suprman: config loaded               94.1 ms  (+   1.7)
+suprman: stylesheet applied         168.7 ms  (+  74.6)
+suprman: keybinds: 260             170.2 ms  (+   1.5)
+suprman: window built               243.9 ms  (+  73.7)
+suprman: presented                  251.0 ms  (+   7.1)
+```
+
+Roughly a third of that is the Python interpreter and GTK typelibs, a third is
+GTK initialising the theme, and the rest is our own widgets — which is why the
+row count above matters.
+
 ## Development
 
 ```sh
@@ -276,6 +312,7 @@ src/suprman/
   manpages.py     apropos index + man rendering
   tldr.py         tldr client / cache / download
   textsearch.py   plain-text search helpers
+  timing.py       opt-in startup milestones (SUPRMAN_TIMING=1)
   layershell.py   optional wlr-layer-shell
   data/           style.css, vim_keys.json
 tests/            unittest suite, headless

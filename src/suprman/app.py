@@ -16,9 +16,12 @@ from gi.repository import Gdk, Gio, GLib, Gtk
 from . import __version__
 from . import config as config_module
 from .config import Config
+from .timing import mark
 from .window import SuprmanWindow
 
 APP_ID = "io.github.suprman.Suprman"
+
+mark("imports done")
 
 
 def _warn(message: str) -> None:
@@ -41,7 +44,15 @@ class SuprmanApp(Gtk.Application):
         window = self.props.active_window
         if window is None:
             window = SuprmanWindow(self, self.config)
+            mark("window created")
         window.present()
+        GLib.idle_add(self._mark_presented)
+
+    @staticmethod
+    def _mark_presented() -> bool:
+        """First idle callback after present(): the window is on screen."""
+        mark("presented")
+        return False
 
     def _load_css(self) -> None:
         if self._css_loaded:
@@ -66,6 +77,7 @@ class SuprmanApp(Gtk.Application):
         Gtk.StyleContext.add_provider_for_display(
             display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
+        mark("stylesheet applied")
         self._css_loaded = True
 
 
@@ -99,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     cfg = config_module.load(args.config, debug=args.debug)
+    mark("config loaded")
     if args.debug:
         _warn(f"config: {cfg.path or 'built-in defaults'}")
         _warn(f"man sections: {', '.join(cfg.behavior.section_list())}")

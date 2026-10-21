@@ -42,6 +42,9 @@ install:
 	install -m 0755 bin/suprman $(DESTDIR)$(BINDIR)/suprman
 	install -d $(DESTDIR)$(DATADIR)/applications
 	install -m 0644 data/suprman.desktop $(DESTDIR)$(DATADIR)/applications/suprman.desktop
+	# Precompile so even the first launch skips source parsing. The .pyc files
+	# stay valid when a packager moves DESTDIR into place.
+	$(PYTHON) -m compileall -q $(DESTDIR)$(LIBDIR) >/dev/null 2>&1 || true
 	@echo "installed suprman $(VERSION) into $(DESTDIR)$(PREFIX)"
 
 uninstall:

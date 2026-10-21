@@ -20,8 +20,6 @@ import shutil
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 RAW_URL = "https://raw.githubusercontent.com/tldr-pages/tldr/main/pages/{platform}/{name}.md"
@@ -160,6 +158,11 @@ class Tldr:
         return None
 
     def _download(self, name: str) -> str | None:
+        # Imported here on purpose: urllib.request costs ~18 ms and most lookups
+        # are served from the on-disk cache instead.
+        import urllib.error
+        import urllib.request
+
         for platform in self.platforms:
             url = RAW_URL.format(platform=platform, name=name)
             request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})

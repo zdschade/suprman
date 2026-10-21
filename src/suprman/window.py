@@ -21,9 +21,16 @@ from gi.repository import Gdk, GLib, Gtk, Pango
 from . import fuzzy, layershell, manpages, query, tldr, vimkeys
 from .config import Config
 from .reader import PART_MAN, PART_STATUS, PART_TLDR, Block, ReaderView
+from .timing import mark
 
 PAGE_LIST = "list"
 PAGE_READER = "reader"
+
+#: Rows built up front. Each one is a ListBoxRow plus three labels, and GTK
+#: styles every node, so building all `max_results` (200 by default) costs more
+#: than the rest of the window together. The rest is built on scroll.
+INITIAL_ROWS = 40
+ROWS_PER_SCROLL = 30
 
 PLACEHOLDER = "search vim keybinds — try “delete line”, or type “man ls”"
 CHIP_VIM = "VIM KEYS"
@@ -86,6 +93,7 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         self.config = config
 
         self._binds = vimkeys.load(config.behavior.vim_keys_file or None)
+        mark(f"keybinds: {len(self._binds)}")
         self._pages: list[manpages.ManPage] | None = None
         self._pages_loading = False
         self._pages_error = ""
@@ -98,6 +106,8 @@ class SuprmanWindow(Gtk.ApplicationWindow):
 
         self._rows_data: list[RowData] = []
         self._row_widgets: list[ResultRow] = []
+        self._shown = 0  # how many of _rows_data have live widgets
+        self._repopulating = False
         self._selected = -1
         self._generation = 0
         self._auto_opened_for = ""
@@ -115,6 +125,7 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         layershell.attach(self, namespace="suprman", mode=config.behavior.layer_shell)
 
         self.show_vim("")
+        mark("window built")
 
     def _on_close_request(self, window: Gtk.Window) -> bool:
         """Stop worker results from touching widgets after the window is gone."""
@@ -157,10 +168,12 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         self.scroller = Gtk.ScrolledWindow()
         self.scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.scroller.set_child(self.listbox)
+        self.scroller.get_vadjustment().connect("value-changed", self._on_scroll)
         self.stack.add_named(self.scroller, PAGE_LIST)
 
-        self.reader = ReaderView(self.config)
-        self.stack.add_named(self.reader, PAGE_READER)
+        # The reader is built on the first page view: a TextView, a TextBuffer,
+        # eight tags and a search entry that most launches never show.
+        self.reader: ReaderView | None = None
 
         self._empty_label = Gtk.Label(xalign=0.0)
         self._empty_label.add_css_class("row-empty")
@@ -297,6 +310,14 @@ class SuprmanWindow(Gtk.ApplicationWindow):
 
     # -- reader ------------------------------------------------------------
 
+    def _ensure_reader(self) -> ReaderView:
+        """Build the reader the first time a page is opened."""
+        if self.reader is None:
+            self.reader = ReaderView(self.config)
+            self.stack.add_named(self.reader, PAGE_READER)
+            mark("reader created")
+        return self.reader
+
     def open_page(self, page: manpages.ManPage) -> None:
         """Show a man page (with its tldr page above it) in the reader."""
         self._generation += 1
@@ -304,11 +325,12 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         subtitle = f"man {page.section}"
         if page.description:
             subtitle = f"{subtitle} · {page.description}"
-        self.reader.begin(page.title, subtitle)
-        self.reader.set_part(PART_STATUS, "", [("desc", "loading…")], order=0)
+        reader = self._ensure_reader()
+        reader.begin(page.title, subtitle)
+        reader.set_part(PART_STATUS, "", [("desc", "loading…")], order=0)
         self._set_chip(CHIP_READER)
         self.stack.set_visible_child_name(PAGE_READER)
-        self.reader.focus_search()
+        reader.focus_search()
 
         if self.config.behavior.tldr:
             threading.Thread(target=self._worker_tldr, args=(generation, page), daemon=True).start()
@@ -320,18 +342,19 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         GLib.idle_add(self._show_tldr, generation, blocks)
 
     def _show_tldr(self, generation: int, blocks: list[Block]) -> bool:
-        if self._closing or generation != self._generation:
+        reader = self.reader
+        if reader is None or self._closing or generation != self._generation:
             return False
         if blocks:
-            self.reader.set_part(PART_TLDR, "TLDR · tldr.sh", blocks, order=10)
+            reader.set_part(PART_TLDR, "TLDR · tldr.sh", blocks, order=10)
         else:
-            self.reader.set_part(
+            reader.set_part(
                 PART_TLDR,
                 "TLDR · tldr.sh",
                 [("desc", "no tldr page for this command (yet)")],
                 order=10,
             )
-        self.reader.remove_part(PART_STATUS)
+        reader.remove_part(PART_STATUS)
         return False
 
     def _worker_man(self, generation: int, page: manpages.ManPage) -> None:
@@ -344,14 +367,15 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         GLib.idle_add(self._show_man_page, generation, text, error)
 
     def _show_man_page(self, generation: int, text: str, error: str) -> bool:
-        if self._closing or generation != self._generation:
+        reader = self.reader
+        if reader is None or self._closing or generation != self._generation:
             return False
         if error:
-            self.reader.set_part(PART_MAN, "MAN PAGE", [("desc", error)], order=20)
+            reader.set_part(PART_MAN, "MAN PAGE", [("desc", error)], order=20)
         else:
-            self.reader.add_man_text(text)
-        self.reader.remove_part(PART_STATUS)
-        self.reader.finish()
+            reader.add_man_text(text)
+        reader.remove_part(PART_STATUS)
+        reader.finish()
         return False
 
     def _close_reader(self) -> None:
@@ -366,39 +390,67 @@ class SuprmanWindow(Gtk.ApplicationWindow):
     # -- rows --------------------------------------------------------------
 
     def _set_rows(self, rows: list[RowData], empty_message: str, total: int | None = None) -> None:
-        self._rows_data = rows
+        self._repopulating = True
+        try:
+            self._rows_data = rows
+            self._shown = 0
+            for widget in self._row_widgets:
+                widget.set_visible(False)
+            # New results start at the top; this also keeps the lazy-growth
+            # check from firing while the list is half rebuilt.
+            self.scroller.get_vadjustment().set_value(0)
 
-        while len(self._row_widgets) < len(rows):
+            has_rows = bool(rows)
+            self._empty_label.set_text(empty_message)
+            self._empty_row.set_visible(not has_rows)
+
+            if has_rows:
+                self._materialize(INITIAL_ROWS)
+                self._select(0)
+            else:
+                self._selected = -1
+                self.listbox.select_row(None)
+            self._update_count(len(rows), total)
+        finally:
+            self._repopulating = False
+
+    def _materialize(self, extra: int) -> None:
+        """Create, bind and show up to ``extra`` more rows."""
+        target = min(len(self._rows_data), self._shown + max(0, extra))
+        while len(self._row_widgets) < target:
             widget = ResultRow()
             self.listbox.insert(widget, len(self._row_widgets))
             self._row_widgets.append(widget)
+        for index in range(self._shown, target):
+            widget = self._row_widgets[index]
+            widget.bind(self._rows_data[index])
+            widget.set_visible(True)
+        self._shown = target
 
-        for index, widget in enumerate(self._row_widgets):
-            if index < len(rows):
-                widget.bind(rows[index])
-                widget.set_visible(True)
-            else:
-                widget.set_visible(False)
-
-        has_rows = bool(rows)
-        self._empty_label.set_text(empty_message)
-        self._empty_row.set_visible(not has_rows)
-
-        if has_rows:
-            self._select(0)
-        else:
-            self._selected = -1
-            self.listbox.select_row(None)
-        self._update_count(len(rows), total)
+    def _on_scroll(self, adjustment: Gtk.Adjustment) -> None:
+        """Build the next batch as the bottom of the list comes into view."""
+        if self._repopulating or self._shown >= len(self._rows_data):
+            return
+        remaining = adjustment.get_upper() - adjustment.get_page_size() - adjustment.get_value()
+        if remaining < 3 * self.config.appearance.row_height:
+            self._materialize(ROWS_PER_SCROLL)
 
     def _select(self, index: int) -> None:
         if not self._rows_data:
             return
         index = max(0, min(len(self._rows_data) - 1, index))
+        was_shown = self._shown
+        if index >= was_shown:
+            self._materialize(index - was_shown + 1)
+
         self._selected = index
         widget = self._row_widgets[index]
         self.listbox.select_row(widget)
         self._ensure_visible(widget)
+        if index >= was_shown:
+            # A freshly built row has no allocation yet, so scroll again once
+            # the layout pass has run.
+            GLib.idle_add(self._ensure_visible, widget)
         self.search.grab_focus()
 
     def _ensure_visible(self, widget: Gtk.Widget) -> None:
@@ -470,20 +522,21 @@ class SuprmanWindow(Gtk.ApplicationWindow):
             self.close()
             return True
 
-        if self._reader_visible():
+        reader = self.reader
+        if reader is not None and self._reader_visible():
             # Backspace is "back", but only once the in-page search is empty;
             # otherwise it has to keep deleting characters.
-            if keyval == Gdk.KEY_BackSpace and not self.reader.search.get_text():
+            if keyval == Gdk.KEY_BackSpace and not reader.search.get_text():
                 self._close_reader()
                 return True
             if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-                self.reader.next_match(backwards=bool(state & Gdk.ModifierType.SHIFT_MASK))
+                reader.next_match(backwards=bool(state & Gdk.ModifierType.SHIFT_MASK))
                 return True
             if ctrl and keyval in (Gdk.KEY_n, Gdk.KEY_N):
-                self.reader.next_match()
+                reader.next_match()
                 return True
             if ctrl and keyval in (Gdk.KEY_p, Gdk.KEY_P):
-                self.reader.next_match(backwards=True)
+                reader.next_match(backwards=True)
                 return True
             return False
 

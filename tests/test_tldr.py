@@ -6,6 +6,8 @@ import os
 import shutil
 import time
 import unittest
+import urllib.error
+import urllib.request
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
@@ -122,7 +124,7 @@ class CacheTest(unittest.TestCase):
         with (
             mock.patch.object(tldr.Tldr, "_from_client", return_value=None),
             mock.patch.object(
-                tldr.urllib.request, "urlopen", return_value=FakeResponse(body)
+                urllib.request, "urlopen", return_value=FakeResponse(body)
             ) as urlopen,
         ):
             markdown = self.client.fetch("grep")
@@ -139,11 +141,11 @@ class CacheTest(unittest.TestCase):
         def fake_urlopen(request, timeout=0):
             if "/common/" in request.full_url:
                 return FakeResponse(body)
-            raise tldr.urllib.error.HTTPError(request.full_url, 404, "not found", {}, None)
+            raise urllib.error.HTTPError(request.full_url, 404, "not found", {}, None)
 
         with (
             mock.patch.object(tldr.Tldr, "_from_client", return_value=None),
-            mock.patch.object(tldr.urllib.request, "urlopen", side_effect=fake_urlopen) as urlopen,
+            mock.patch.object(urllib.request, "urlopen", side_effect=fake_urlopen) as urlopen,
         ):
             markdown = self.client.fetch("grep")
 
