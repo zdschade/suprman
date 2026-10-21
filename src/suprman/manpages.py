@@ -41,6 +41,16 @@ class ManError(RuntimeError):
     """Raised when a page cannot be rendered."""
 
 
+#: Names starting with these are internal (dotfiles, perl/thunderbird helpers)
+#: rather than commands anyone wants to browse.
+_JUNK_PREFIXES = (".", "_")
+
+
+def is_listable_name(name: str) -> bool:
+    """False for placeholder pages such as ``.foo`` or ``_bar``."""
+    return bool(name) and not name.startswith(_JUNK_PREFIXES)
+
+
 @dataclass(frozen=True)
 class ManPage:
     """One installed man page."""
@@ -85,7 +95,9 @@ def parse_apropos(text: str) -> list[ManPage]:
         description = (match.group("description") or "").strip()
         for name in match.group("name").split(","):
             name = name.strip()
-            if not name:
+            # A page with no description is a whatis stub for something that is
+            # not really a command; internal names are noise too.
+            if not is_listable_name(name) or not description:
                 continue
             key = (name, section)
             if key not in pages:
@@ -107,6 +119,8 @@ def _parse_manpath_output(text: str) -> list[ManPage]:
             name = match.group("name")
             if name.endswith(".3pm"):  # perl pages keep their suffix in the name
                 name = name[: -len(".3pm")]
+            if not is_listable_name(name):
+                continue
             pages.setdefault((name, section), ManPage(name=name, section=section))
     return sorted(pages.values(), key=lambda page: page.sort_key)
 
@@ -169,6 +183,8 @@ def _read_cache(cache_file: Path, max_age: int = CACHE_TTL_SECONDS) -> list[ManP
         pages = [
             ManPage(name=name, section=section, description=description)
             for name, section, description in payload["pages"]
+            # Caches written before the name filter existed still hold junk.
+            if is_listable_name(name)
         ]
         return pages or None
     except (OSError, ValueError, KeyError, TypeError):

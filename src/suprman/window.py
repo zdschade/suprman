@@ -31,7 +31,7 @@ CHIP_MAN = "MAN PAGES"
 CHIP_TLDR = "TLDR"
 CHIP_READER = "READER"
 
-HINT = "↑↓ move · Enter open · Esc clear or quit · Tab next · “man ls” opens a page"
+HINT = "↑↓ move · Enter open · Esc quit · Tab next · “man ls” opens a page"
 
 
 @dataclass
@@ -101,6 +101,7 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         self._selected = -1
         self._generation = 0
         self._auto_opened_for = ""
+        self._closing = False
 
         self.set_title("suprman")
         self.set_decorated(False)
@@ -108,11 +109,18 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         self.add_css_class("suprman")
         self.set_default_size(config.appearance.width, config.appearance.height)
 
+        self.connect("close-request", self._on_close_request)
         self._build()
         self._install_controllers()
         layershell.attach(self, namespace="suprman", mode=config.behavior.layer_shell)
 
         self.show_vim("")
+
+    def _on_close_request(self, window: Gtk.Window) -> bool:
+        """Stop worker results from touching widgets after the window is gone."""
+        self._closing = True
+        self._generation += 1
+        return False  # let the default handler destroy the window
 
     # -- construction ------------------------------------------------------
 
@@ -279,6 +287,8 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         GLib.idle_add(self._finish_index, pages, error)
 
     def _finish_index(self, pages: list[manpages.ManPage], error: str) -> bool:
+        if self._closing:
+            return False
         self._pages_loading = False
         self._pages = pages
         self._pages_error = error
@@ -310,7 +320,7 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         GLib.idle_add(self._show_tldr, generation, blocks)
 
     def _show_tldr(self, generation: int, blocks: list[Block]) -> bool:
-        if generation != self._generation:
+        if self._closing or generation != self._generation:
             return False
         if blocks:
             self.reader.set_part(PART_TLDR, "TLDR · tldr.sh", blocks, order=10)
@@ -334,7 +344,7 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         GLib.idle_add(self._show_man_page, generation, text, error)
 
     def _show_man_page(self, generation: int, text: str, error: str) -> bool:
-        if generation != self._generation:
+        if self._closing or generation != self._generation:
             return False
         if error:
             self.reader.set_part(PART_MAN, "MAN PAGE", [("desc", error)], order=20)
@@ -455,11 +465,17 @@ class SuprmanWindow(Gtk.ApplicationWindow):
     ) -> bool:
         ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
 
+        # Escape always closes the popup, wherever the focus happens to be.
         if keyval == Gdk.KEY_Escape:
-            self._go_back()
+            self.close()
             return True
 
         if self._reader_visible():
+            # Backspace is "back", but only once the in-page search is empty;
+            # otherwise it has to keep deleting characters.
+            if keyval == Gdk.KEY_BackSpace and not self.reader.search.get_text():
+                self._close_reader()
+                return True
             if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
                 self.reader.next_match(backwards=bool(state & Gdk.ModifierType.SHIFT_MASK))
                 return True
@@ -491,14 +507,3 @@ class SuprmanWindow(Gtk.ApplicationWindow):
             self._select(self._selected + (-1 if backwards else 1))
             return True
         return False
-
-    def _go_back(self) -> None:
-        if self._reader_visible():
-            self._close_reader()
-            return
-        if self.search.get_text():
-            self.search.set_text("")
-            self._auto_opened_for = ""
-            self._refresh("")
-            return
-        self.close()

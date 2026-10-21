@@ -57,6 +57,46 @@ class ParseAproposTest(unittest.TestCase):
         self.assertIn("directory contents", page.haystack)
 
 
+class JunkFilterTest(unittest.TestCase):
+    OUTPUT = """\
+.hidden (1)          - not a real command
+_internal (3)        - also noise
+nodesc (1)
+ls (1)               - list directory contents
+"""
+
+    def test_names_and_descriptionless_pages_are_dropped(self) -> None:
+        pages = manpages.parse_apropos(self.OUTPUT)
+        self.assertEqual([page.title for page in pages], ["ls(1)"])
+
+    def test_is_listable_name(self) -> None:
+        self.assertTrue(manpages.is_listable_name("ls"))
+        self.assertTrue(manpages.is_listable_name("git-add"))
+        self.assertFalse(manpages.is_listable_name(".hidden"))
+        self.assertFalse(manpages.is_listable_name("_internal"))
+        self.assertFalse(manpages.is_listable_name(""))
+
+    def test_manpath_scan_skips_internal_names(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "man1").mkdir()
+            (root / "man1" / ".hidden.1.gz").write_bytes(b"")
+            (root / "man1" / "real.1.gz").write_bytes(b"")
+            pages = manpages._parse_manpath_output(str(root))
+        self.assertEqual([page.name for page in pages], ["real"])
+
+    def test_stale_cache_entries_are_filtered_on_read(self) -> None:
+        with TemporaryDirectory() as directory:
+            cache_file = Path(directory) / manpages.CACHE_FILENAME
+            payload = {
+                "built": time.time(),
+                "pages": [[".hidden", "1", "junk"], ["ls", "1", "list directory contents"]],
+            }
+            cache_file.write_text(json.dumps(payload), encoding="utf-8")
+            cached = manpages._read_cache(cache_file)
+        self.assertEqual([page.name for page in cached or []], ["ls"])
+
+
 class ManpathFallbackTest(unittest.TestCase):
     def test_files_are_discovered(self) -> None:
         with TemporaryDirectory() as directory:

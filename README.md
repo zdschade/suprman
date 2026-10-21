@@ -123,7 +123,9 @@ Everything happens in one field.
 
 Inside a man page the search box stays: typing filters and highlights every
 hit, `Enter` / `Ctrl-n` walk forward, `Shift+Enter` / `Ctrl-p` walk back, and
-the counter shows `3 / 17 matches`.
+the counter shows `3 / 17 matches`. Pages are never re-wrapped — they are
+rendered at `man_width` columns and long lines scroll sideways, because
+re-flowing man output at a different width is what turns it into ragged soup.
 
 | Key                | List                    | Reader                    |
 | ------------------ | ----------------------- | ------------------------- |
@@ -131,7 +133,12 @@ the counter shows `3 / 17 matches`.
 | `Tab` / `Shift-Tab`| move                    | —                         |
 | `PgUp` / `PgDn`    | jump 10 rows            | —                         |
 | `Enter`            | open row / copy keybind | next match                |
-| `Esc`              | clear query, then quit  | back to the list          |
+| `⌫ Backspace`      | —                       | back to the list          |
+| `Esc`              | quit                    | quit                      |
+
+`Esc` closes the popup from anywhere. `Backspace` goes back one level: from a
+man page to the list it was opened from, as long as the in-page search box is
+empty (so it can still delete characters normally).
 
 Enter on a keybind row copies it to the clipboard, which is handy when you are
 about to paste it into a config file.
@@ -225,7 +232,9 @@ Point `[behavior] vim_keys_file` at your own file to replace the bundled one.
 Malformed entries are skipped with a warning instead of breaking the popup.
 
 **Man pages** are indexed with `apropos` (falling back to a `manpath` scan),
-cached in `~/.cache/suprman/man_index.json` for a day, and re-rendered per page
+cached in `~/.cache/suprman/man_index.json` for a day. Entries that are not
+really commands — names starting with `.` or `_`, and whatis stubs with no
+description — are left out of the list; and re-rendered per page
 at `man_width` columns with hyphenation and justification off, so text reflows
 cleanly instead of arriving pre-wrapped for an 80-column terminal. Delete the
 cache file after installing packages if you want the list immediately.

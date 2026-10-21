@@ -47,12 +47,14 @@ entry.search > text > selection {
   background-color: $accent_soft;
 }
 
+/* Vertically centred against the search entry: no top margin, and a fixed
+   line height so the padded box is symmetric. */
 .chip {
   background-color: $accent_soft;
   color: $accent;
   border-radius: 6px;
   padding: 3px 9px;
-  margin-top: 8px;
+  margin: 0;
   font-size: 8pt;
   font-weight: bold;
 }

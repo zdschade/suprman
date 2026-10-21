@@ -77,7 +77,10 @@ class ReaderView(Gtk.Box):
         self._view.set_editable(False)
         self._view.set_cursor_visible(False)
         self._view.set_monospace(True)
-        self._view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        # man pages are rendered at `man_width` columns; wrapping them again at
+        # a different width is what turns them into ragged, hard-to-read lines.
+        # Long lines scroll sideways instead.
+        self._view.set_wrap_mode(Gtk.WrapMode.NONE)
         self._view.set_left_margin(2)
         self._view.set_right_margin(6)
         self._view.set_top_margin(2)
@@ -85,7 +88,7 @@ class ReaderView(Gtk.Box):
         self._view.add_css_class("reader-body")
 
         scroller = Gtk.ScrolledWindow()
-        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         scroller.set_vexpand(True)
         scroller.set_child(self._view)
         self._scroller = scroller
@@ -95,7 +98,9 @@ class ReaderView(Gtk.Box):
         self._count = Gtk.Label(xalign=0.0)
         self._count.add_css_class("match-count")
         self._count.set_hexpand(True)
-        hint = Gtk.Label(label="Enter next  ·  Shift+Enter previous  ·  Esc back", xalign=1.0)
+        hint = Gtk.Label(
+            label="Enter next  ·  Shift+Enter previous  ·  ⌫ back  ·  Esc quit", xalign=1.0
+        )
         hint.add_css_class("footer")
         footer.append(self._count)
         footer.append(hint)
