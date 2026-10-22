@@ -44,7 +44,13 @@ def _warn(message: str) -> None:
 class SuprmanApp(Gtk.Application):
     """Single-window application; ``serve`` keeps it alive between popups."""
 
-    def __init__(self, cfg: Config, debug: bool = False, serve: bool = False) -> None:
+    def __init__(
+        self,
+        cfg: Config,
+        debug: bool = False,
+        serve: bool = False,
+        idle_exit_minutes: int = 0,
+    ) -> None:
         # GTK4 moved the application flags to Gio; Gtk.ApplicationFlags only
         # exists in GTK3. NON_UNIQUE keeps a second launch from waiting on a
         # remote instance: handoff goes through our own socket instead.
@@ -52,8 +58,10 @@ class SuprmanApp(Gtk.Application):
         self.config = cfg
         self.debug = debug
         self.serve = serve
+        self.idle_exit_minutes = idle_exit_minutes
         self._css_loaded = False
         self._server: ControlServer | None = None
+        self._idle_source = 0
 
     def do_activate(self) -> None:
         self._load_css()
@@ -65,16 +73,51 @@ class SuprmanApp(Gtk.Application):
 
         if self.serve:
             self._start_server(window)
+            self._arm_idle_timer()
             mark("serving")
             return
 
         window.present()
         GLib.idle_add(self._mark_presented)
+        # Warm up on the way out, never while this window is still showing: a
+        # resident instance would otherwise answer the next press with a second
+        # window on top of this one.
+        window.connect("close-request", self._on_cold_window_closing)
 
     @staticmethod
     def _mark_presented() -> bool:
         """First idle callback after present(): the window is on screen."""
         mark("presented")
+        return False
+
+    def _on_cold_window_closing(self, window: Gtk.Window) -> bool:
+        """Leave a warm instance behind so the next press costs ~30 ms."""
+        if (
+            self.config.behavior.resident == "auto"
+            and not self.serve
+            and ipc.spawn_server(self.config.behavior.resident_idle_minutes)
+        ):
+            mark("warm instance spawned")
+        return False
+
+    # -- resident lifetime -------------------------------------------------
+
+    def _arm_idle_timer(self) -> None:
+        """Restart the "nobody used me for a while" countdown."""
+        if self.idle_exit_minutes <= 0:
+            return
+        if self._idle_source:
+            GLib.source_remove(self._idle_source)
+        self._idle_source = GLib.timeout_add_seconds(
+            self.idle_exit_minutes * 60, self._on_idle_timeout
+        )
+
+    def _on_idle_timeout(self) -> bool:
+        window = self.props.active_window
+        if window is not None and window.get_visible():
+            return True  # in use; check again after another interval
+        self._idle_source = 0
+        self.quit()
         return False
 
     # -- resident mode -----------------------------------------------------
@@ -84,9 +127,11 @@ class SuprmanApp(Gtk.Application):
 
         server = ControlServer(self._on_command)
         if not server.start():
+            ipc.clear_spawn_marker()
             _warn("another suprman instance is already serving; exiting")
             self.quit()
             return
+        ipc.clear_spawn_marker()
         self._server = server
         self.connect("shutdown", self._on_shutdown)
 
@@ -100,6 +145,7 @@ class SuprmanApp(Gtk.Application):
         if window is None:
             return
         mark(f"command: {command}")
+        self._arm_idle_timer()
 
         if command == "quit":
             self.quit()
@@ -169,6 +215,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="stop a resident instance and exit",
     )
     parser.add_argument(
+        "--idle-exit",
+        type=int,
+        default=0,
+        metavar="MINUTES",
+        help="with --serve: exit after MINUTES idle (0 = stay until told to quit)",
+    )
+    parser.add_argument(
         "--example-config",
         action="store_true",
         help="write an annotated config file (if missing) and exit",
@@ -202,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
         _warn("no WAYLAND_DISPLAY or DISPLAY set; nothing to draw on")
 
-    app = SuprmanApp(cfg, debug=args.debug, serve=args.serve)
+    app = SuprmanApp(cfg, debug=args.debug, serve=args.serve, idle_exit_minutes=args.idle_exit)
 
     def quit_on_signal() -> bool:
         app.quit()

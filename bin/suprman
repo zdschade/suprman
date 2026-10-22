@@ -28,10 +28,12 @@ else:
 
 # If a resident instance is running, this is a socket write and an exit --
 # no GTK import at all.
-from suprman import ipc
+from suprman import ipc, timing
 
 if ipc.try_handoff(sys.argv):
+    timing.mark("handoff: delivered")
     sys.exit(0)
+timing.mark("handoff: no resident instance")
 
 from suprman.app import main
 

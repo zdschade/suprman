@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 import socket
+import sys
 import threading
 import time
 import unittest
@@ -105,6 +106,62 @@ class IpcTest(unittest.TestCase):
             path = ipc.socket_path()
         self.assertEqual(path.name, ipc.SOCKET_FILENAME)
         self.assertTrue(path.parent.name == "suprman")
+
+
+class SpawnTest(unittest.TestCase):
+    """Warming: leave a resident instance behind after a cold start."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.runtime = Path(self._tmp.name)
+        patcher = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(self.runtime)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        # spawn_server() inspects sys.argv[0]; point it at a stand-in launcher.
+        self.marker = self.runtime / "spawned.txt"
+        self.launcher = self.runtime / "fake-launcher"
+        self.launcher.write_text(
+            "import pathlib, sys\n"
+            f"pathlib.Path({str(self.marker)!r}).write_text(' '.join(sys.argv[1:]))\n",
+            encoding="utf-8",
+        )
+        argv = mock.patch.object(sys, "argv", [str(self.launcher)])
+        argv.start()
+        self.addCleanup(argv.stop)
+
+    def test_spawns_a_detached_server_with_an_idle_timeout(self) -> None:
+        self.assertTrue(ipc.spawn_server(idle_minutes=15))
+        deadline = time.monotonic() + 10
+        while not self.marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertTrue(self.marker.exists(), "child never ran")
+        self.assertEqual(self.marker.read_text(encoding="utf-8"), "--serve --idle-exit 15")
+
+    def test_does_not_spawn_when_one_is_already_listening(self) -> None:
+        server = OneShotServer(ipc.socket_path())
+        self.addCleanup(server.cleanup)
+        self.assertFalse(ipc.spawn_server())
+        server.join()
+        self.assertEqual(server.received, ["ping"])
+        self.assertFalse(self.marker.exists())
+
+    def test_second_spawn_is_skipped_while_one_is_starting(self) -> None:
+        self.assertTrue(ipc.spawn_server())
+        self.assertFalse(ipc.spawn_server(), "spawned twice in a row")
+        ipc.clear_spawn_marker()
+
+    def test_marker_expires(self) -> None:
+        marker = self.runtime / ipc.SPAWN_MARKER
+        marker.write_text("", encoding="utf-8")
+        old = time.time() - ipc.SPAWN_GUARD_SECONDS - 5
+        os.utime(marker, (old, old))
+        self.assertTrue(ipc.spawn_server(), "guard ignored an old marker")
+
+    def test_refuses_to_spawn_from_a_module_run(self) -> None:
+        with mock.patch.object(sys, "argv", ["/somewhere/suprman/__main__.py"]):
+            self.assertFalse(ipc.spawn_server())
+        self.assertFalse(self.marker.exists())
 
 
 class HandoffCostTest(unittest.TestCase):

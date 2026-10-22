@@ -79,6 +79,11 @@ class Behavior:
     layer_shell: str = "auto"  # auto | always | never
     case_sensitive: bool = False
     open_exact: bool = True
+    # auto: leave a resident instance behind after the first cold start, so the
+    # next hotkey press is a socket write. never: always start from scratch.
+    resident: str = "auto"
+    # Minutes a resident instance may sit idle before it exits (0 = never).
+    resident_idle_minutes: int = 30
 
     def section_list(self) -> tuple[str, ...]:
         """Parse ``man_sections`` into a tuple of man section names."""
@@ -194,6 +199,11 @@ def _validate_behavior(behavior: Behavior, debug: bool) -> Behavior:
         changes["man_sections"] = Behavior().man_sections
     if behavior.tldr_platform == "":
         changes["tldr_platform"] = "auto"
+    if behavior.resident not in ("auto", "never"):
+        _warn(debug, f"[behavior] resident: unknown value {behavior.resident!r}")
+        changes["resident"] = "auto"
+    if behavior.resident_idle_minutes < 0:
+        changes["resident_idle_minutes"] = 0
     return dataclasses.replace(behavior, **changes)
 
 
@@ -383,6 +393,11 @@ tldr_ttl_days = 7
 tldr_platform = auto
 # Point at your own keybind file (same JSON schema as data/vim_keys.json).
 vim_keys_file =
+# auto: leave a resident instance running so later launches are instant.
+# never: always start cold.
+resident = auto
+# Minutes before an idle resident instance exits (0 = never).
+resident_idle_minutes = 30
 # auto: use wlr-layer-shell when the compositor supports it.
 # always: fail loudly if unavailable.  never: plain toplevel window.
 layer_shell = auto

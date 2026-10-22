@@ -187,6 +187,10 @@ vim_keys_file =
 # auto | always | never
 layer_shell = auto
 
+# auto: leave a resident instance behind so later launches are instant.
+resident = auto
+resident_idle_minutes = 30
+
 case_sensitive = false
 open_exact = true
 ```
@@ -266,34 +270,45 @@ presented               +247 ms   first frame and compositor round trip
 ```
 
 Nothing in the app can remove the first two thirds — that is the price of
-starting Python and GTK from scratch. What can be removed is doing it on every
-hotkey press:
+starting Python and GTK from scratch. So suprman stops paying it per keypress:
+when you close a cold-started window it leaves **one resident instance** behind,
+hidden, listening on a Unix socket. The next press is a socket write and an exit
+— **~32 ms measured**, and that process never imports GTK at all.
 
-```sh
-suprman --serve     # stay resident with the window hidden
+That happens automatically; you keep binding your hotkey to plain `suprman`.
+The first press after logging in is still cold, and so is the first press after
+the instance has been idle for `resident_idle_minutes` (30 by default, `0` never
+exits). To opt out entirely:
+
+```ini
+[behavior]
+resident = never
 ```
 
-Then bind your hotkey to plain `suprman`. If a resident instance is running, the
-launch is a Unix socket write and an exit — **measured at ~35 ms** here — and
-that process never imports GTK at all. `Esc` hides the popup; the instance stays
-warm. `suprman --quit` stops it.
-
-Autostart it (either one):
+To keep it warm permanently — no cold start even at login — run it as a service
+and let systemd own the lifecycle:
 
 ```sh
-# systemd user unit, installed with the package
-systemctl --user enable --now suprman
+systemctl --user enable --now suprman     # unit is installed with the package
+suprman --serve                            # or run it by hand, same thing
+suprman --quit                             # stop it
+```
 
-# or a desktop autostart entry
+Without systemd's `graphical-session.target` (Hyprland with uwsm disabled, some
+minimal window managers), use a desktop autostart entry instead:
+
+```sh
 mkdir -p ~/.config/autostart
 printf '[Desktop Entry]\nType=Application\nName=suprman (resident)\nExec=suprman --serve\n' \
   > ~/.config/autostart/suprman.desktop
 ```
 
-This is opt-in on purpose: a resident instance holds roughly 80-120 MB of RSS,
-which is a real cost for a tool you may open twice a day. Without `--serve`
-everything still works, just at cold-start speed. If you use a compositor rule
-to blur `suprman`, keep it: hiding and showing reuses the same window.
+`--serve` started this way never exits on idle; `--serve --idle-exit 30` gets the
+temporary behaviour. `Esc` hides the popup in resident mode instead of exiting,
+and the next press re-opens it with a cleared query.
+
+The trade-off is memory: a resident instance holds roughly 80-120 MB of RSS.
+That is why it is not always-on by default, and why the idle timeout exists.
 
 ## Startup time (cold)
 
