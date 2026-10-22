@@ -1,7 +1,9 @@
 # suprman
 
-A small, glassy popup for two things you look up constantly and never remember:
-**Vim keybinds** and **man pages**.
+> [!NOTE]
+> This is 100% vibe coded. I do not make any claims to its effectiveness, security, or coherence. Use at your own risk.
+
+I was in the process of memorizing vim commands and wanted something I could quickly pop up and search by keyword. That is essentially what this is: A lightweight searchable popup that defaults to vim commands. While I was at it, I figured a keyword-searchable man/tldr section would be helpful too, so you can do that my typing man in the search window.
 
 Bind it to a key, press it, type. `delete line` finds `dd`. `man ls` opens the
 `ls` page with its [tldr](https://tldr.sh/) summary above it — and, unlike
