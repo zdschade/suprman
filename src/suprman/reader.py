@@ -69,6 +69,14 @@ class ReaderView(Gtk.Box):
         self.search.add_css_class("reader-search")
         self.search.set_hexpand(True)
         self.search.connect("search-changed", self._on_search_changed)
+        if self.config.behavior.vim_mode:
+            # Normal mode: "/" is the only way into the filter. Leaving it
+            # focusable would let GTK's focus pass (and a stray click) put the
+            # caret there, so every vim key would end up as text.
+            self.search.set_can_focus(False)
+            click = Gtk.GestureClick()
+            click.connect("pressed", self._on_search_clicked)
+            self.search.add_controller(click)
         self.append(self.search)
 
         self.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
@@ -194,11 +202,19 @@ class ReaderView(Gtk.Box):
 
     def focus_search(self) -> None:
         """Insert mode: the in-page filter takes the keyboard."""
+        self.search.set_can_focus(True)
         self.search.grab_focus()
 
     def focus_body(self) -> None:
         """Normal mode: the document takes the keyboard, so j/k can scroll it."""
+        if self.config.behavior.vim_mode:
+            self.search.set_can_focus(False)
         self._view.grab_focus()
+
+    def _on_search_clicked(
+        self, gesture: Gtk.GestureClick, presses: int, x: float, y: float
+    ) -> None:
+        self.focus_search()
 
     def focus_default(self) -> None:
         """Focus whatever this configuration expects after a page opens."""

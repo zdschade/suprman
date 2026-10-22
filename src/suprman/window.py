@@ -135,6 +135,11 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         self.connect("close-request", self._on_close_request)
         self._build()
         self._install_controllers()
+        # Normal mode: the field must not be able to take focus at all. Doing
+        # this up front (not only on map) means GTK's initial-focus pass has
+        # nothing to hand the keyboard to but the list.
+        if config.behavior.vim_mode:
+            self.search.set_can_focus(False)
         layershell.attach(self, namespace="suprman", mode=config.behavior.layer_shell)
 
         self.show_vim("")
@@ -228,6 +233,11 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         # and therefore after app.do_activate asked for normal mode. Without
         # this hook a fresh popup comes up in insert mode.
         self.connect("map", self._on_map)
+        # The entry is unfocusable in normal mode, so a mouse click has to opt
+        # into insert mode explicitly.
+        click = Gtk.GestureClick()
+        click.connect("pressed", self._on_search_clicked)
+        self.search.add_controller(click)
 
     # -- search ------------------------------------------------------------
 
@@ -570,17 +580,37 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         if self._reader_visible() and self.reader is not None:
             self.reader.focus_default()
         elif self.config.behavior.vim_mode:
+            self.search.set_can_focus(False)
             self.listbox.grab_focus()
         else:
+            self.search.set_can_focus(True)
             self.search.grab_focus()
 
+    def _enter_insert_mode(self) -> None:
+        """Make the search field focusable again and put the caret in it."""
+        self.search.set_can_focus(True)
+        self.search.grab_focus()
+
+    def _on_search_clicked(
+        self, gesture: Gtk.GestureClick, presses: int, x: float, y: float
+    ) -> None:
+        if self.config.behavior.vim_mode:
+            self._enter_insert_mode()
+
     def _text_entry_focused(self) -> bool:
-        """True while the user is typing into a search field (insert mode)."""
+        """True while the user is typing into a search field (insert mode).
+
+        A ``Gtk.SearchEntry`` delegates focus to its inner ``GtkText``, so
+        comparing the focus widget to the entry itself is not enough: check
+        whether the focus lives inside either search field.
+        """
         focus = self.get_focus()
-        if focus is self.search:
-            return True
-        reader = self.reader
-        return reader is not None and focus is reader.search
+        if focus is None:
+            return False
+        entries = [self.search]
+        if self.reader is not None:
+            entries.append(self.reader.search)
+        return any(focus is entry or focus.is_ancestor(entry) for entry in entries)
 
     def _on_map(self, window: Gtk.Window) -> None:
         """Normal mode wins whenever the popup becomes visible."""
@@ -726,7 +756,7 @@ class SuprmanWindow(Gtk.ApplicationWindow):
             if reader is not None:
                 reader.focus_search()
             else:
-                self.search.grab_focus()
+                self._enter_insert_mode()
         elif action == "command":
             self._start_command()
         else:  # pragma: no cover - every intent above is handled

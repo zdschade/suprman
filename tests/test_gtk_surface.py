@@ -108,13 +108,17 @@ class GtkSurfaceTest(unittest.TestCase):
 
 
 class _Focusable:
-    """Stand-in for a widget, recording how often it was focused."""
+    """Stand-in for a widget, recording focus and focusability."""
 
     def __init__(self) -> None:
         self.focused = 0
+        self.can_focus = True
 
     def grab_focus(self) -> None:
         self.focused += 1
+
+    def set_can_focus(self, can_focus: bool) -> None:
+        self.can_focus = can_focus
 
 
 class _Label:
@@ -154,6 +158,7 @@ if GTK is not None:  # pragma: no branch - GTK-less runs skip the tests below
         _on_map = SuprmanWindow._on_map
         _focus_after_map = SuprmanWindow._focus_after_map
         focus_default = SuprmanWindow.focus_default
+        _enter_insert_mode = SuprmanWindow._enter_insert_mode
 
         def __init__(self, vim_mode: bool = True) -> None:
             from suprman import vimnav
@@ -220,12 +225,30 @@ class KeyHandlingTest(unittest.TestCase):
         self.fake.focus_default()
         self.assertEqual(self.fake.listbox.focused, 1)
         self.assertEqual(self.fake.search.focused, 0)
+        # Unfocusable is the part that makes it stick: GTK cannot hand the
+        # keyboard to the field at map time or on a stray click.
+        self.assertFalse(self.fake.search.can_focus)
+
+    def test_slash_makes_the_field_focusable_again(self) -> None:
+        self.fake.focus_default()
+        self.assertTrue(self.fake.press("slash"))
+        self.assertTrue(self.fake.search.can_focus)
+        self.assertEqual(self.fake.search.focused, 1)
+
+    def test_escape_from_insert_mode_makes_the_field_unfocusable(self) -> None:
+        self.fake.press("slash")
+        self.fake.insert = True
+        self.fake.press("Escape")
+        self.assertFalse(self.fake.search.can_focus)
+        self.assertEqual(self.fake.listbox.focused, 1)
+        self.assertEqual(self.fake.closed, 0)
 
     def test_vim_mode_off_keeps_focus_in_the_search_field(self) -> None:
         fake = _FakeWindow(vim_mode=False)
         fake.focus_default()
         self.assertEqual(fake.search.focused, 1)
         self.assertEqual(fake.listbox.focused, 0)
+        self.assertTrue(fake.search.can_focus)
 
     def test_mapping_the_window_reclaims_normal_mode(self) -> None:
         # GTK assigns initial focus at map time, so the popup must re-assert
