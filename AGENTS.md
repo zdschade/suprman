@@ -155,6 +155,9 @@ raising. Gate widget tests on a real display, then hand the UI check to the user
 - Vim normal mode is a *focus* decision: `_select()` must not `grab_focus()` the entry, and the
   initial focus goes to the listbox. Insert mode is inferred from `window.get_focus()` rather than
   stored as a flag, so `GtkSearchEntry`'s caret and the mode can never disagree.
+- Focus set right after `present()` is not final: GTK picks its initial focus while *mapping* the
+  window, and the first focusable widget is the search entry, so the popup opens in insert mode
+  unless `_on_map` re-asserts normal mode (and re-runs it from an idle, after GTK's own pass).
 - Escape has an order in vim mode: cancel the `":"` prompt, then leave insert mode, then close.
   Closing first (the old behaviour) throws away a query the moment "/" is used.
 - The `":"` prompt is a `vimnav.CommandLine` plus a footer label, not a `Gtk.Entry`: an entry would

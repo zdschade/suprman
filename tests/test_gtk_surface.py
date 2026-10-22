@@ -151,6 +151,8 @@ if GTK is not None:  # pragma: no branch - GTK-less runs skip the tests below
         _start_command = SuprmanWindow._start_command
         _render_command = SuprmanWindow._render_command
         _end_command = SuprmanWindow._end_command
+        _on_map = SuprmanWindow._on_map
+        _focus_after_map = SuprmanWindow._focus_after_map
         focus_default = SuprmanWindow.focus_default
 
         def __init__(self, vim_mode: bool = True) -> None:
@@ -223,6 +225,22 @@ class KeyHandlingTest(unittest.TestCase):
         fake = _FakeWindow(vim_mode=False)
         fake.focus_default()
         self.assertEqual(fake.search.focused, 1)
+        self.assertEqual(fake.listbox.focused, 0)
+
+    def test_mapping_the_window_reclaims_normal_mode(self) -> None:
+        # GTK assigns initial focus at map time, so the popup must re-assert
+        # normal mode afterwards or it opens with the caret in the entry.
+        self.fake._on_map(None)
+        self.assertEqual(self.fake.listbox.focused, 1)
+        self.assertEqual(self.fake.search.focused, 0)
+        self.fake._focus_after_map()
+        self.assertEqual(self.fake.listbox.focused, 2)
+
+    def test_mapping_leaves_the_entry_alone_when_vim_mode_is_off(self) -> None:
+        fake = _FakeWindow(vim_mode=False)
+        fake._on_map(None)
+        fake._focus_after_map()
+        self.assertEqual(fake.search.focused, 0)
         self.assertEqual(fake.listbox.focused, 0)
 
     # -- normal mode -------------------------------------------------------

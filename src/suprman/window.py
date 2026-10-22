@@ -223,6 +223,11 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         controller.connect("key-pressed", self._on_key_pressed)
         self.add_controller(controller)
+        # GTK assigns the initial focus while mapping the window (to the first
+        # focusable widget: the search entry), which happens after present()
+        # and therefore after app.do_activate asked for normal mode. Without
+        # this hook a fresh popup comes up in insert mode.
+        self.connect("map", self._on_map)
 
     # -- search ------------------------------------------------------------
 
@@ -576,6 +581,19 @@ class SuprmanWindow(Gtk.ApplicationWindow):
             return True
         reader = self.reader
         return reader is not None and focus is reader.search
+
+    def _on_map(self, window: Gtk.Window) -> None:
+        """Normal mode wins whenever the popup becomes visible."""
+        if not self.config.behavior.vim_mode:
+            return
+        self.focus_default()
+        # Belt and braces: run again once GTK's own map-time focus pass is done.
+        GLib.idle_add(self._focus_after_map)
+
+    def _focus_after_map(self) -> bool:
+        if self.config.behavior.vim_mode:
+            self.focus_default()
+        return False
 
     def _on_key_pressed(
         self, controller: Gtk.EventControllerKey, keyval: int, keycode: int, state: Gdk.ModifierType
