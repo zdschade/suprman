@@ -157,8 +157,9 @@ if GTK is not None:  # pragma: no branch - GTK-less runs skip the tests below
         _end_command = SuprmanWindow._end_command
         _on_map = SuprmanWindow._on_map
         _focus_after_map = SuprmanWindow._focus_after_map
-        focus_default = SuprmanWindow.focus_default
-        _enter_insert_mode = SuprmanWindow._enter_insert_mode
+        _typing = SuprmanWindow._typing
+        _on_list_clicked = SuprmanWindow._on_list_clicked
+        _is_text_key = staticmethod(SuprmanWindow._is_text_key)
 
         def __init__(self, vim_mode: bool = True) -> None:
             from suprman import vimnav
@@ -172,6 +173,8 @@ if GTK is not None:  # pragma: no branch - GTK-less runs skip the tests below
             self.listbox = _Focusable()
             self._rows_data: list[object] = [object() for _ in range(30)]
             self.reader = None
+            self._insert_mode = False
+            # Stand-in for "the keyboard is in the entry".
             self.insert = False
             self._selected = 0
             self.moves: list[int] = []
@@ -181,7 +184,17 @@ if GTK is not None:  # pragma: no branch - GTK-less runs skip the tests below
         # -- collaborators the handler calls ------------------------------
 
         def _text_entry_focused(self) -> bool:
-            return self.insert
+            # A field only counts if it is focused *and* focusable, matching
+            # the real implementation.
+            return self.insert and self.search.can_focus
+
+        def focus_default(self) -> None:
+            SuprmanWindow.focus_default(self)
+            self.insert = not self.config.behavior.vim_mode
+
+        def _enter_insert_mode(self) -> None:
+            SuprmanWindow._enter_insert_mode(self)
+            self.insert = True
 
         def _reader_visible(self) -> bool:
             return False
@@ -237,8 +250,9 @@ class KeyHandlingTest(unittest.TestCase):
 
     def test_escape_from_insert_mode_makes_the_field_unfocusable(self) -> None:
         self.fake.press("slash")
-        self.fake.insert = True
+        self.assertTrue(self.fake._insert_mode)
         self.fake.press("Escape")
+        self.assertFalse(self.fake._insert_mode)
         self.assertFalse(self.fake.search.can_focus)
         self.assertEqual(self.fake.listbox.focused, 1)
         self.assertEqual(self.fake.closed, 0)
@@ -307,8 +321,22 @@ class KeyHandlingTest(unittest.TestCase):
         self.assertTrue(self.fake.press("h"))
         self.assertEqual((self.fake.moves, self.fake.activated), ([], 0))
 
-    def test_unrelated_keys_reach_gtk(self) -> None:
-        self.assertFalse(self.fake.press("z"))
+    def test_normal_mode_swallows_stray_printable_keys(self) -> None:
+        # Nothing should reach a widget as text in normal mode.
+        self.assertTrue(self.fake.press("z"))
+        self.assertEqual(self.fake.moves, [])
+        self.assertTrue(self.fake.press("q"))
+
+    def test_non_text_keys_still_reach_gtk(self) -> None:
+        self.assertFalse(self.fake.press("F5"))
+
+    def test_normal_mode_ignores_a_focused_but_unfocusable_entry(self) -> None:
+        # Exactly the reported bug: GTK hands the field focus at map time, yet
+        # the field is unfocusable in normal mode, so j must still navigate.
+        self.fake.search.can_focus = False
+        self.fake.insert = True
+        self.assertTrue(self.fake.press("j"))
+        self.assertEqual(self.fake.moves, [1])
 
     def test_insert_mode_lets_letters_type(self) -> None:
         self.fake.insert = True

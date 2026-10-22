@@ -85,10 +85,16 @@ class SuprmanApp(Gtk.Application):
         # window on top of this one.
         window.connect("close-request", self._on_cold_window_closing)
 
-    @staticmethod
-    def _mark_presented() -> bool:
+    def _mark_presented(self) -> bool:
         """First idle callback after present(): the window is on screen."""
         mark("presented")
+        # `SUPRMAN_TIMING=1` also reports where the keyboard went; "the cursor
+        # is in the wrong place" is otherwise impossible to debug remotely.
+        window = self.props.active_window
+        if window is not None:
+            focus = window.get_focus()
+            name = type(focus).__name__ if focus is not None else "none"
+            mark(f"focus: {name}")
         return False
 
     def _on_cold_window_closing(self, window: Gtk.Window) -> bool:
@@ -252,6 +258,7 @@ def main(argv: list[str] | None = None) -> int:
         _warn(f"config: {cfg.path or 'built-in defaults'}")
         _warn(f"man sections: {', '.join(cfg.behavior.section_list())}")
         _warn(f"tldr: {'enabled' if cfg.behavior.tldr else 'disabled'}")
+        _warn(f"vim keys: {'on (normal mode)' if cfg.behavior.vim_mode else 'off'}")
 
     if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
         _warn("no WAYLAND_DISPLAY or DISPLAY set; nothing to draw on")

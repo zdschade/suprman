@@ -124,6 +124,9 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         # state the key handler carries between presses.
         self._command = vimnav.CommandLine()
         self._pending_g = False
+        # Vim mode only: true while "/" (or a click on a search field) has
+        # opened insert mode. Never inferred from focus alone -- see _typing().
+        self._insert_mode = False
 
         self.set_title("suprman")
         self.set_decorated(False)
@@ -238,6 +241,10 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         click = Gtk.GestureClick()
         click.connect("pressed", self._on_search_clicked)
         self.search.add_controller(click)
+        # Clicking back into the list leaves insert mode.
+        list_click = Gtk.GestureClick()
+        list_click.connect("pressed", self._on_list_clicked)
+        self.listbox.add_controller(list_click)
 
     # -- search ------------------------------------------------------------
 
@@ -577,6 +584,7 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         navigation rather than text.  Insert mode ("/") focuses the search
         field, and the reader focuses its body for the same reason.
         """
+        self._insert_mode = False
         if self._reader_visible() and self.reader is not None:
             self.reader.focus_default()
         elif self.config.behavior.vim_mode:
@@ -588,6 +596,7 @@ class SuprmanWindow(Gtk.ApplicationWindow):
 
     def _enter_insert_mode(self) -> None:
         """Make the search field focusable again and put the caret in it."""
+        self._insert_mode = True
         self.search.set_can_focus(True)
         self.search.grab_focus()
 
@@ -596,6 +605,23 @@ class SuprmanWindow(Gtk.ApplicationWindow):
     ) -> None:
         if self.config.behavior.vim_mode:
             self._enter_insert_mode()
+
+    def _on_list_clicked(self, gesture: Gtk.GestureClick, presses: int, x: float, y: float) -> None:
+        """Clicking back into the list leaves insert mode."""
+        self._insert_mode = False
+
+    def _typing(self) -> bool:
+        """True when keystrokes belong to a text field.
+
+        In vim mode this is the explicit insert-mode flag or a focused (and
+        focusable) search field. Routing never depends on the focused widget
+        alone: GTK can hand a text entry the focus at map time, and a popup
+        whose keys silently become query text is worse than one that drops a
+        stray letter.
+        """
+        if not self.config.behavior.vim_mode:
+            return True
+        return self._insert_mode or self._text_entry_focused()
 
     def _text_entry_focused(self) -> bool:
         """True while the user is typing into a search field (insert mode).
@@ -610,18 +636,24 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         entries = [self.search]
         if self.reader is not None:
             entries.append(self.reader.search)
-        return any(focus is entry or focus.is_ancestor(entry) for entry in entries)
+        return any(
+            entry.get_can_focus() and (focus is entry or focus.is_ancestor(entry))
+            for entry in entries
+        )
 
     def _on_map(self, window: Gtk.Window) -> None:
         """Normal mode wins whenever the popup becomes visible."""
         if not self.config.behavior.vim_mode:
             return
         self.focus_default()
-        # Belt and braces: run again once GTK's own map-time focus pass is done.
-        GLib.idle_add(self._focus_after_map)
+        # Compositors and GTK versions disagree about when the window and its
+        # children end up mapped and focused, so claim it again over the first
+        # few hundred milliseconds. Insert mode is left alone.
+        for delay in (0, 60, 250):
+            GLib.timeout_add(delay, self._focus_after_map)
 
     def _focus_after_map(self) -> bool:
-        if self.config.behavior.vim_mode:
+        if self.config.behavior.vim_mode and not self._typing():
             self.focus_default()
         return False
 
@@ -639,7 +671,7 @@ class SuprmanWindow(Gtk.ApplicationWindow):
             if self._command.active:
                 self._end_command()
                 return True
-            if vim and self._text_entry_focused():
+            if vim and self._typing():
                 self.focus_default()
                 return True
             self.close()
@@ -668,12 +700,20 @@ class SuprmanWindow(Gtk.ApplicationWindow):
             if ctrl and keyval in (Gdk.KEY_p, Gdk.KEY_P):
                 reader.next_match(backwards=True)
                 return True
-            if vim and not self._text_entry_focused():
-                return self._vim_normal_key(name, ctrl, pending_g, reader)
+            if vim and not self._typing():
+                if self._vim_normal_key(name, ctrl, pending_g, reader):
+                    return True
+                # Normal mode never types: a printable key that is not a
+                # command is dropped rather than handed to a focused widget.
+                if not ctrl and self._is_text_key(keyval):
+                    return True
             return False
 
-        if vim and not self._text_entry_focused() and self._vim_normal_key(name, ctrl, pending_g):
-            return True
+        if vim and not self._typing():
+            if self._vim_normal_key(name, ctrl, pending_g):
+                return True
+            if not ctrl and self._is_text_key(keyval):
+                return True
 
         if keyval in (Gdk.KEY_Up, Gdk.KEY_KP_Up) or (ctrl and keyval in (Gdk.KEY_p, Gdk.KEY_P)):
             self._select(self._selected - 1)
@@ -695,6 +735,12 @@ class SuprmanWindow(Gtk.ApplicationWindow):
             self._select(self._selected + (-1 if backwards else 1))
             return True
         return False
+
+    @staticmethod
+    def _is_text_key(keyval: int) -> bool:
+        """True for keys that would insert a character into a text field."""
+        text = Gdk.keyval_to_unicode(keyval)
+        return bool(text) and chr(text).isprintable()
 
     def _vim_normal_key(
         self, name: str, ctrl: bool, pending_g: bool, reader: ReaderView | None = None
