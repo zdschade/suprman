@@ -18,7 +18,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, GLib, Gtk, Pango
 
-from . import fuzzy, layershell, manpages, query, tldr, vimkeys
+from . import fuzzy, layershell, manpages, query, tldr, vimkeys, vimnav
 from .config import Config
 from .reader import PART_MAN, PART_STATUS, PART_TLDR, Block, ReaderView
 from .timing import mark
@@ -43,6 +43,10 @@ CHIP_TLDR = "TLDR"
 CHIP_READER = "READER"
 
 HINT = "↑↓ move · Enter open · Esc quit · Tab next · “man ls” opens a page"
+HINT_VIM = "j/k move · Enter open · / search · :q quit"
+
+#: Rows moved by a half-page key (Ctrl-d/Ctrl-u) and by PgUp/PgDn.
+HALF_PAGE_ROWS = 10
 
 
 @dataclass
@@ -116,6 +120,10 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         self._generation = 0
         self._auto_opened_for = ""
         self._closing = False
+        # Vim normal mode: the ":" prompt and the "gg" prefix are the only
+        # state the key handler carries between presses.
+        self._command = vimnav.CommandLine()
+        self._pending_g = False
 
         self.set_title("suprman")
         self.set_decorated(False)
@@ -197,9 +205,16 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         self._count = Gtk.Label(xalign=0.0)
         self._count.add_css_class("footer")
         self._count.set_hexpand(True)
-        self._hint = Gtk.Label(label=HINT, xalign=1.0)
+        # The ":" prompt replaces the hint label while it is open, so the
+        # footer never changes height on entry.
+        self._command_label = Gtk.Label(xalign=1.0)
+        self._command_label.add_css_class("cmdline")
+        self._command_label.set_visible(False)
+        hint = HINT_VIM if self.config.behavior.vim_mode else HINT
+        self._hint = Gtk.Label(label=hint, xalign=1.0)
         self._hint.add_css_class("footer")
         footer.append(self._count)
+        footer.append(self._command_label)
         footer.append(self._hint)
         surface.append(footer)
 
@@ -338,7 +353,7 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         reader.set_part(PART_STATUS, "", [("desc", "loading…")], order=0)
         self._set_chip(CHIP_READER)
         self.stack.set_visible_child_name(PAGE_READER)
-        reader.focus_search()
+        reader.focus_default()
 
         if self.config.behavior.tldr:
             threading.Thread(target=self._worker_tldr, args=(generation, page), daemon=True).start()
@@ -388,18 +403,19 @@ class SuprmanWindow(Gtk.ApplicationWindow):
 
     def reset(self) -> None:
         """Return to a fresh popup: no query, no open page."""
+        self._end_command()
         if self._reader_visible():
             self._close_reader()
         elif self.search.get_text():
             self.search.set_text("")
         else:
             self._refresh("")
-        self.search.grab_focus()
+        self.focus_default()
 
     def _close_reader(self) -> None:
         self._generation += 1  # invalidate in-flight loads
         self.stack.set_visible_child_name(PAGE_LIST)
-        self.search.grab_focus()
+        self.focus_default()
         self._refresh(self.search.get_text(), allow_auto=False)
 
     def _reader_visible(self) -> bool:
@@ -475,7 +491,10 @@ class SuprmanWindow(Gtk.ApplicationWindow):
             # A freshly built row has no allocation yet, so scroll again once
             # the layout pass has run.
             GLib.idle_add(self._ensure_visible, widget)
-        self.search.grab_focus()
+        # In vim normal mode the keyboard stays out of the search field; only
+        # the insert mode ("/") puts it there.
+        if not self.config.behavior.vim_mode:
+            self.search.grab_focus()
 
     def _ensure_visible(self, widget: Gtk.Widget) -> None:
         """Scroll the selected row into view without stealing focus."""
@@ -536,15 +555,54 @@ class SuprmanWindow(Gtk.ApplicationWindow):
 
     # -- keyboard ----------------------------------------------------------
 
+    def focus_default(self) -> None:
+        """Send the keyboard where the current mode expects it.
+
+        Vim mode opens in normal mode: the list owns the keyboard, so j/k are
+        navigation rather than text.  Insert mode ("/") focuses the search
+        field, and the reader focuses its body for the same reason.
+        """
+        if self._reader_visible() and self.reader is not None:
+            self.reader.focus_default()
+        elif self.config.behavior.vim_mode:
+            self.listbox.grab_focus()
+        else:
+            self.search.grab_focus()
+
+    def _text_entry_focused(self) -> bool:
+        """True while the user is typing into a search field (insert mode)."""
+        focus = self.get_focus()
+        if focus is self.search:
+            return True
+        reader = self.reader
+        return reader is not None and focus is reader.search
+
     def _on_key_pressed(
         self, controller: Gtk.EventControllerKey, keyval: int, keycode: int, state: Gdk.ModifierType
     ) -> bool:
         ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
+        vim = self.config.behavior.vim_mode
+        name = Gdk.keyval_name(keyval) or ""
 
-        # Escape always closes the popup, wherever the focus happens to be.
+        # Escape closes the popup from anywhere -- except that it also has to
+        # leave the ":" prompt and insert mode first.
         if keyval == Gdk.KEY_Escape:
+            self._pending_g = False
+            if self._command.active:
+                self._end_command()
+                return True
+            if vim and self._text_entry_focused():
+                self.focus_default()
+                return True
             self.close()
             return True
+
+        if self._command.active:
+            return self._command_key(keyval)
+
+        # Any key consumes a pending "g", whether or not it forms "gg".
+        pending_g = self._pending_g
+        self._pending_g = False
 
         reader = self.reader
         if reader is not None and self._reader_visible():
@@ -562,7 +620,12 @@ class SuprmanWindow(Gtk.ApplicationWindow):
             if ctrl and keyval in (Gdk.KEY_p, Gdk.KEY_P):
                 reader.next_match(backwards=True)
                 return True
+            if vim and not self._text_entry_focused():
+                return self._vim_normal_key(name, ctrl, pending_g, reader)
             return False
+
+        if vim and not self._text_entry_focused() and self._vim_normal_key(name, ctrl, pending_g):
+            return True
 
         if keyval in (Gdk.KEY_Up, Gdk.KEY_KP_Up) or (ctrl and keyval in (Gdk.KEY_p, Gdk.KEY_P)):
             self._select(self._selected - 1)
@@ -571,10 +634,10 @@ class SuprmanWindow(Gtk.ApplicationWindow):
             self._select(self._selected + 1)
             return True
         if keyval == Gdk.KEY_Page_Up:
-            self._select(self._selected - 10)
+            self._select(self._selected - HALF_PAGE_ROWS)
             return True
         if keyval == Gdk.KEY_Page_Down:
-            self._select(self._selected + 10)
+            self._select(self._selected + HALF_PAGE_ROWS)
             return True
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             self._activate()
@@ -584,3 +647,105 @@ class SuprmanWindow(Gtk.ApplicationWindow):
             self._select(self._selected + (-1 if backwards else 1))
             return True
         return False
+
+    def _vim_normal_key(
+        self, name: str, ctrl: bool, pending_g: bool, reader: ReaderView | None = None
+    ) -> bool:
+        """Handle one normal-mode key; ``False`` means GTK should see it.
+
+        ``reader`` is set only when the reader is the visible page, so j/k
+        scroll the document instead of moving the hidden list selection.
+        """
+        if name == "g" and not ctrl:
+            if pending_g:
+                if reader is not None:
+                    reader.scroll_home()
+                else:
+                    self._select(0)
+            else:
+                self._pending_g = True
+            return True
+
+        action = vimnav.intent(name, ctrl=ctrl)
+        if not action:
+            return False
+        if action == "down":
+            if reader is not None:
+                reader.scroll_lines(1)
+            else:
+                self._select(self._selected + 1)
+        elif action == "up":
+            if reader is not None:
+                reader.scroll_lines(-1)
+            else:
+                self._select(self._selected - 1)
+        elif action == "left":
+            if reader is not None:
+                reader.scroll_columns(-4)
+        elif action == "right":
+            if reader is not None:
+                reader.scroll_columns(4)
+            else:
+                self._activate()
+        elif action in ("half_down", "half_up"):
+            step = 1 if action == "half_down" else -1
+            if reader is not None:
+                reader.scroll_pages(0.5 * step)
+            else:
+                self._select(self._selected + step * HALF_PAGE_ROWS)
+        elif action in ("page_down", "page_up"):
+            step = 1 if action == "page_down" else -1
+            if reader is not None:
+                reader.scroll_pages(step)
+            else:
+                self._select(self._selected + step * HALF_PAGE_ROWS)
+        elif action == "bottom":
+            if reader is not None:
+                reader.scroll_end()
+            else:
+                self._select(len(self._rows_data) - 1)
+        elif action == "search":
+            if reader is not None:
+                reader.focus_search()
+            else:
+                self.search.grab_focus()
+        elif action == "command":
+            self._start_command()
+        else:  # pragma: no cover - every intent above is handled
+            return False
+        return True
+
+    # -- ":" prompt --------------------------------------------------------
+
+    def _start_command(self) -> None:
+        self._command.start()
+        self._render_command()
+        self._command_label.set_visible(True)
+        self._hint.set_visible(False)
+
+    def _render_command(self) -> None:
+        self._command_label.set_text(f"{self._command.prompt}▏")
+
+    def _end_command(self) -> None:
+        self._command.cancel()
+        self._command_label.set_visible(False)
+        self._hint.set_visible(True)
+
+    def _command_key(self, keyval: int) -> bool:
+        """Feed one key to the ":" prompt; every key belongs to it."""
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            action = self._command.execute()
+            self._end_command()
+            if action == "quit":
+                self.close()
+        elif keyval == Gdk.KEY_BackSpace:
+            if self._command.backspace():
+                self._render_command()
+            else:
+                self._end_command()
+        else:
+            char = Gdk.keyval_to_unicode(keyval)
+            if char:
+                self._command.feed(chr(char))
+                self._render_command()
+        return True

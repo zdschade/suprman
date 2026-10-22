@@ -41,6 +41,7 @@ class LoadTest(TempConfigTest):
             max_results = 42
             tldr = false
             man_sections = 1, 8
+            vim_mode = false
             """
         )
         cfg = config.load(path)
@@ -49,6 +50,7 @@ class LoadTest(TempConfigTest):
         self.assertEqual(cfg.appearance.width, 900)
         self.assertEqual(cfg.behavior.max_results, 42)
         self.assertFalse(cfg.behavior.tldr)
+        self.assertFalse(cfg.behavior.vim_mode)
         self.assertEqual(cfg.behavior.section_list(), ("1", "8"))
         self.assertEqual(cfg.path, path)
 

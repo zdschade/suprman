@@ -13,7 +13,7 @@ lessons this project was built on.
 | Command | What it does |
 | --- | --- |
 | `make run` | Run from the checkout (`PYTHONPATH=src python3 -m suprman`); needs a display |
-| `make test` | `unittest` suite, 138 tests; ~10 skip without GTK or a display |
+| `make test` | `unittest` suite, 186 tests; a few skip without GTK or a display |
 | `make lint` | `ruff check` + formatting (installed? `python3 -m pip install ruff`) |
 | `make check` | Byte-compile everything (syntax only) |
 | `make example-config` | Write the annotated config to `~/.config/suprman/suprman.conf` |
@@ -31,6 +31,7 @@ src/suprman/window.py    the popup: search field, result list, lazy rows, mode s
 src/suprman/reader.py    man/tldr view with in-page search and match walking
 src/suprman/query.py     search bar -> (Mode, term); the "man"/"tldr" prefixes
 src/suprman/fuzzy.py     token ranking: substring > subsequence, phrase bonus, coverage
+src/suprman/vimnav.py    vim key intents, the ":" prompt, scroll clamping (GTK-free)
 src/suprman/vimkeys.py   dataset loader (KeyBind, haystack composition)
 src/suprman/manpages.py  apropos index, manpath fallback, man rendering, disk cache
 src/suprman/tldr.py      client / cache / HTTP fallback, markdown -> styled lines
@@ -78,6 +79,21 @@ named part of `ReaderView`.
 
 `Config` is the single source of truth for look and behaviour; `reader._create_tags` is the one
 place colours are set in Python (text-buffer tags), so keep it in sync with `Appearance`.
+
+## Keys (vim mode, on by default)
+
+One capture-phase `EventControllerKey` on the window routes everything through
+`window._on_key_pressed`, which has three states: the `":"` prompt (every key belongs to it),
+insert mode (a `Gtk.SearchEntry` has focus, so text entry wins) and normal mode (vim keys act,
+via `vimnav.intent`). `behavior.vim_mode = false` skips the last two and keeps the old contract
+where the search field always has focus.
+
+Normal-mode keys: `j`/`k` move or scroll a line, `h`/`l` scroll sideways (in the list `l` opens),
+`Ctrl-d`/`Ctrl-u` half a page, `Ctrl-f`/`Ctrl-b` a page, `gg`/`G` top/bottom, `/` insert mode,
+`:` the prompt (`:q`, `:q!`, `:quit`, `:qa` quit). Reader scrolling lives on `ReaderView`
+(`scroll_lines`, `scroll_columns`, `scroll_pages`, `scroll_home`, `scroll_end`) and clamps through
+`vimnav.clamp_scroll`, because a viewport taller than the content makes `upper - page_size`
+negative.
 
 ## Resident instance (why the hotkey path is fast)
 
@@ -136,6 +152,13 @@ raising. Gate widget tests on a real display, then hand the UI check to the user
 - GTK CSS `scrollbar slider { min-width: … }` without `margin: 0` reports negative sizes.
 - One capture-phase `EventControllerKey` on the window handles all keys; per-widget handlers fought
   `GtkSearchEntry`'s own Escape and needed the version-sensitive `get_current_event_state()`.
+- Vim normal mode is a *focus* decision: `_select()` must not `grab_focus()` the entry, and the
+  initial focus goes to the listbox. Insert mode is inferred from `window.get_focus()` rather than
+  stored as a flag, so `GtkSearchEntry`'s caret and the mode can never disagree.
+- Escape has an order in vim mode: cancel the `":"` prompt, then leave insert mode, then close.
+  Closing first (the old behaviour) throws away a query the moment "/" is used.
+- The `":"` prompt is a `vimnav.CommandLine` plus a footer label, not a `Gtk.Entry`: an entry would
+  take focus, and moving focus mid-popup changes which path every later key takes.
 - `ListBox.select_row()` does not scroll while focus stays in the entry: measure with
   `row.compute_bounds(listbox)` and move the `vadjustment`.
 - `section_title` is deliberately excluded from keybind haystacks; including it made every
@@ -151,6 +174,9 @@ raising. Gate widget tests on a real display, then hand the UI check to the user
   their own line — `#` also starts colours), validation in `_validate_*` if it can be wrong,
   regenerate `docs/config.example.conf`, mention it in README.
 - **Add a search prefix**: `query.Mode` + `PREFIXES` + the dispatch in `window._refresh`.
+- **Add a vim key**: a line in `vimnav._KEYS` (name as `Gdk.keyval_name` spells it) and a branch in
+  `window._vim_normal_key`; list and reader behaviour live in the same branch. Add the case to
+  `tests/test_gtk_surface.py::KeyHandlingTest` — it drives the real handler without widgets.
 - **Change the look**: `appearance` keys + `style.css` only; text-buffer colours live in
   `reader._create_tags`.
 - **Change ranking**: `fuzzy.py`; the acceptance tests are in `tests/test_fuzzy.py` and

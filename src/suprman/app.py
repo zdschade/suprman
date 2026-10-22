@@ -78,6 +78,7 @@ class SuprmanApp(Gtk.Application):
             return
 
         window.present()
+        window.focus_default()
         GLib.idle_add(self._mark_presented)
         # Warm up on the way out, never while this window is still showing: a
         # resident instance would otherwise answer the next press with a second
@@ -162,7 +163,7 @@ class SuprmanApp(Gtk.Application):
     def _show(self, window: SuprmanWindow) -> None:
         window.reset()
         window.present()
-        window.search.grab_focus()
+        window.focus_default()
 
     # -- stylesheet --------------------------------------------------------
 

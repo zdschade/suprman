@@ -24,7 +24,7 @@ paging through a wall of text.
 │  x         delete the character under the cu…   Editing       │
 │  dG        delete from the cursor to the end…   Operators     │
 └───────────────────────────────────────────────────────────────┘
-  ↑↓ move · Enter open · Esc clear or quit · Tab next
+  j/k move · Enter open · / search · :q quit · “man ls” opens a page
 ```
 
 ## Install
@@ -113,21 +113,52 @@ window-rule {
 
 ## Using it
 
-Everything happens in one field.
+Everything happens in one field — and, by default, the keyboard navigates like
+Vim and only types into that field when you ask it to.
 
 | You type        | You get                                                        |
 | --------------- | -------------------------------------------------------------- |
 | `delete line`   | matching keybinds, best first                                  |
-| `:q`            | keybinds for quitting (colons are ignored)                     |
+| `:q`            | (in the search field) keybinds for quitting, colons ignored    |
 | `man`           | the list of every installed man page                           |
 | `man grep`      | filtered pages; `grep` opens immediately on an exact match      |
 | `tldr grep`     | same list, jumping straight into the reader with tldr on top   |
 
-Inside a man page the search box stays: typing filters and highlights every
-hit, `Enter` / `Ctrl-n` walk forward, `Shift+Enter` / `Ctrl-p` walk back, and
-the counter shows `3 / 17 matches`. Pages are never re-wrapped — they are
-rendered at `man_width` columns and long lines scroll sideways, because
-re-flowing man output at a different width is what turns it into ragged soup.
+### Vim keys
+
+The popup opens in *normal mode*: the keyboard drives the list, not the search
+field, so a stray `j` scrolls instead of becoming a query.
+
+| Key                 | List                     | Reader                        |
+| ------------------- | ------------------------ | ----------------------------- |
+| `j` / `k`           | next / previous row      | scroll down / up one line     |
+| `h` / `l`           | — / open the row         | scroll left / right           |
+| `Ctrl-d` / `Ctrl-u` | half a page              | half a page                   |
+| `Ctrl-f` / `Ctrl-b` | half a page              | a full page                   |
+| `gg` / `G`          | first / last row         | top / bottom                  |
+| `/`                 | focus the search field   | focus the in-page filter      |
+| `Enter`             | open row / copy keybind  | next match                    |
+| `⌫ Backspace`       | —                        | back to the list              |
+| `Esc`               | quit                     | quit                          |
+| `:q` then `Enter`   | quit                     | quit                          |
+
+`/` is insert mode: type to filter, `Enter` opens the highlighted row, `Esc`
+leaves insert mode (keeping the query) and a second `Esc` closes the popup.
+`:` opens a command line in the footer, shown in the accent colour: `:q`,
+`:q!`, `:quit` and `:qa` quit, and `Esc` cancels the prompt. Anything else is
+ignored — there is nothing to write.
+
+Inside a man page the search box stays: `/` focuses it, typing filters and
+highlights every hit, `Enter` / `Ctrl-n` walk forward, `Shift+Enter` / `Ctrl-p`
+walk back, and the counter shows `3 / 17 matches`. Pages are never re-wrapped —
+they are rendered at `man_width` columns and long lines scroll sideways, which
+is what `h`/`l` are for, because re-flowing man output at a different width is
+what turns it into ragged soup.
+
+### Without vim keys
+
+Set `vim_mode = false` in `[behavior]` and the old contract comes back: the
+keyboard always types into the search field, and these move around instead.
 
 | Key                | List                    | Reader                    |
 | ------------------ | ----------------------- | ------------------------- |
@@ -195,6 +226,9 @@ resident_idle_minutes = 30
 
 case_sensitive = false
 open_exact = true
+
+# Vim navigation (j/k, h/l, /, :q). false = always type into the search field.
+vim_mode = true
 ```
 
 Comments must live on their own line, since `#` also starts colour values.
@@ -371,6 +405,7 @@ src/suprman/
   config.py       INI parsing, validation, CSS rendering
   query.py        search bar → mode + term
   fuzzy.py        token-based ranking
+  vimnav.py       vim key intents, ':' prompt, scroll clamping
   vimkeys.py      keybind dataset loader
   manpages.py     apropos index + man rendering
   tldr.py         tldr client / cache / download
@@ -382,7 +417,7 @@ tests/            unittest suite, headless
 ```
 
 The pure modules (`fuzzy`, `query`, `config`, `textsearch`, `manpages`, `tldr`,
-`vimkeys`) have no GTK imports, which is why the tests run anywhere; the GTK
+`vimkeys`, `vimnav`) have no GTK imports, which is why the tests run anywhere; the GTK
 layer is thin and keeps rendering decisions in `style.css`.
 
 ## Known limits

@@ -79,6 +79,9 @@ class Behavior:
     layer_shell: str = "auto"  # auto | always | never
     case_sensitive: bool = False
     open_exact: bool = True
+    # Vim keys for navigation: j/k move or scroll, h/l sideways, / search,
+    # :q quit.  false keeps the keyboard in the search field at all times.
+    vim_mode: bool = True
     # auto: leave a resident instance behind after the first cold start, so the
     # next hotkey press is a socket write. never: always start from scratch.
     resident: str = "auto"
@@ -404,6 +407,10 @@ layer_shell = auto
 case_sensitive = false
 # Open a man page straight away when the query matches a page name exactly.
 open_exact = true
+# Vim keys for navigation: j/k move or scroll, h/l sideways, / focuses the
+# search field, :q quits.  The search field is focused only in insert mode.
+# false restores the old behaviour: the keyboard always types into the field.
+vim_mode = true
 """
 
 

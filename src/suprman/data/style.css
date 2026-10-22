@@ -101,6 +101,14 @@ list.suprman-list > row.suprman-row:selected {
   border-color: $border;
 }
 
+/* Vim normal mode parks the keyboard on the list; Adwaita's focus ring would
+   otherwise draw a second outline around the selected row. */
+list.suprman-list,
+list.suprman-list:focus,
+list.suprman-list > row.suprman-row:focus {
+  outline: none;
+}
+
 .row-keys {
   font-family: $key_family;
   font-size: ${key_size}pt;
@@ -161,6 +169,13 @@ list.suprman-list > row.suprman-row:selected {
 .footer {
   color: $muted;
   font-size: 8.5pt;
+}
+
+/* The ":" prompt, shown in place of the hint while it is open. */
+.cmdline {
+  color: $accent;
+  font-family: $key_family;
+  font-size: ${key_size}pt;
 }
 
 /* -- chrome -------------------------------------------------------------- */

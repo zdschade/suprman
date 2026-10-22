@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import time
+import types
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -104,6 +105,241 @@ class GtkSurfaceTest(unittest.TestCase):
         reader.search.set_text("list")
         self.assertIn("directory", reader.text)
         self.assertIsInstance(reader, self.Gtk.Box)
+
+
+class _Focusable:
+    """Stand-in for a widget, recording how often it was focused."""
+
+    def __init__(self) -> None:
+        self.focused = 0
+
+    def grab_focus(self) -> None:
+        self.focused += 1
+
+
+class _Label:
+    """Stand-in for Gtk.Label."""
+
+    def __init__(self, visible: bool = False) -> None:
+        self.text = ""
+        self.visible = visible
+
+    def set_text(self, text: str) -> None:
+        self.text = text
+
+    def set_visible(self, visible: bool) -> None:
+        self.visible = visible
+
+    def get_visible(self) -> bool:
+        return self.visible
+
+
+if GTK is not None:  # pragma: no branch - GTK-less runs skip the tests below
+    from suprman.window import SuprmanWindow
+
+    class _FakeWindow:
+        """A window-shaped object carrying the real key handling.
+
+        Constructing widgets without a display segfaults, so only the methods
+        under test are taken from :class:`SuprmanWindow`; everything they touch
+        (labels, focus targets, the selected row) is a stand-in.
+        """
+
+        _on_key_pressed = SuprmanWindow._on_key_pressed
+        _vim_normal_key = SuprmanWindow._vim_normal_key
+        _command_key = SuprmanWindow._command_key
+        _start_command = SuprmanWindow._start_command
+        _render_command = SuprmanWindow._render_command
+        _end_command = SuprmanWindow._end_command
+        focus_default = SuprmanWindow.focus_default
+
+        def __init__(self, vim_mode: bool = True) -> None:
+            from suprman import vimnav
+
+            self.config = types.SimpleNamespace(behavior=types.SimpleNamespace(vim_mode=vim_mode))
+            self._command = vimnav.CommandLine()
+            self._pending_g = False
+            self._hint = _Label(visible=True)
+            self._command_label = _Label()
+            self.search = _Focusable()
+            self.listbox = _Focusable()
+            self._rows_data: list[object] = [object() for _ in range(30)]
+            self.reader = None
+            self.insert = False
+            self._selected = 0
+            self.moves: list[int] = []
+            self.closed = 0
+            self.activated = 0
+
+        # -- collaborators the handler calls ------------------------------
+
+        def _text_entry_focused(self) -> bool:
+            return self.insert
+
+        def _reader_visible(self) -> bool:
+            return False
+
+        def _select(self, index: int) -> None:
+            # Same clamp as the real list, without the widget plumbing.
+            index = max(0, min(len(self._rows_data) - 1, index))
+            self.moves.append(index)
+            self._selected = index
+
+        def _activate(self) -> None:
+            self.activated += 1
+
+        def close(self) -> None:
+            self.closed += 1
+
+        # -- test helper ---------------------------------------------------
+
+        def press(self, name: str, ctrl: bool = False) -> bool:
+            """Send a key by GDK name (``j``, ``slash``, ``Return``, ...)."""
+            Gdk = GTK[0]  # type: ignore[index]
+            keyval = Gdk.keyval_from_name(name)
+            state = Gdk.ModifierType.CONTROL_MASK if ctrl else Gdk.ModifierType(0)
+            return SuprmanWindow._on_key_pressed(self, None, keyval, 0, state)
+
+        def type_text(self, text: str) -> None:
+            for char in text:
+                self.press(char)
+
+
+@unittest.skipUnless(GTK is not None, "GTK4/PyGObject is not installed")
+class KeyHandlingTest(unittest.TestCase):
+    """Normal mode, insert mode and the ':' prompt, driven key by key."""
+
+    def setUp(self) -> None:
+        self.fake = _FakeWindow()
+
+    # -- focus policy ------------------------------------------------------
+
+    def test_normal_mode_focuses_the_list_not_the_entry(self) -> None:
+        self.fake.focus_default()
+        self.assertEqual(self.fake.listbox.focused, 1)
+        self.assertEqual(self.fake.search.focused, 0)
+
+    def test_vim_mode_off_keeps_focus_in_the_search_field(self) -> None:
+        fake = _FakeWindow(vim_mode=False)
+        fake.focus_default()
+        self.assertEqual(fake.search.focused, 1)
+        self.assertEqual(fake.listbox.focused, 0)
+
+    # -- normal mode -------------------------------------------------------
+
+    def test_j_and_k_move_one_row(self) -> None:
+        self.assertTrue(self.fake.press("j"))
+        self.assertTrue(self.fake.press("k"))
+        self.assertEqual(self.fake.moves, [1, 0])
+
+    def test_ctrl_d_and_ctrl_u_move_a_half_page(self) -> None:
+        self.assertTrue(self.fake.press("d", ctrl=True))
+        self.assertTrue(self.fake.press("u", ctrl=True))
+        self.assertEqual(self.fake.moves, [10, 0])
+
+    def test_shift_g_jumps_to_the_last_row(self) -> None:
+        self.assertTrue(self.fake.press("G"))
+        self.assertEqual(self.fake.moves, [len(self.fake._rows_data) - 1])
+
+    def test_gg_jumps_to_the_top(self) -> None:
+        self.assertTrue(self.fake.press("g"))
+        self.assertTrue(self.fake._pending_g, "first g must arm the sequence")
+        self.assertTrue(self.fake.press("g"))
+        self.assertEqual(self.fake.moves, [0])
+        self.assertFalse(self.fake._pending_g)
+
+    def test_a_pending_g_does_not_swallow_the_next_key(self) -> None:
+        self.fake.press("g")
+        self.assertTrue(self.fake.press("j"))
+        self.assertEqual(self.fake.moves, [1])
+
+    def test_slash_focuses_the_search_field(self) -> None:
+        self.assertTrue(self.fake.press("slash"))
+        self.assertEqual(self.fake.search.focused, 1)
+        self.assertEqual(self.fake.moves, [])
+
+    def test_l_opens_the_selected_row(self) -> None:
+        self.assertTrue(self.fake.press("l"))
+        self.assertEqual(self.fake.activated, 1)
+
+    def test_h_does_nothing_in_the_list(self) -> None:
+        self.assertTrue(self.fake.press("h"))
+        self.assertEqual((self.fake.moves, self.fake.activated), ([], 0))
+
+    def test_unrelated_keys_reach_gtk(self) -> None:
+        self.assertFalse(self.fake.press("z"))
+
+    def test_insert_mode_lets_letters_type(self) -> None:
+        self.fake.insert = True
+        self.assertFalse(self.fake.press("j"))
+        self.assertFalse(self.fake.press("k"))
+        self.assertEqual(self.fake.moves, [])
+
+    def test_insert_mode_slash_types_a_slash(self) -> None:
+        self.fake.insert = True
+        self.assertFalse(self.fake.press("slash"))
+        self.assertEqual(self.fake.search.focused, 0)
+
+    # -- escape ------------------------------------------------------------
+
+    def test_escape_closes_in_normal_mode(self) -> None:
+        self.fake.press("Escape")
+        self.assertEqual(self.fake.closed, 1)
+
+    def test_escape_leaves_insert_mode_instead_of_quitting(self) -> None:
+        self.fake.insert = True
+        self.fake.press("Escape")
+        self.assertEqual(self.fake.closed, 0)
+        self.assertEqual(self.fake.listbox.focused, 1)
+
+    def test_escape_closes_when_vim_mode_is_off(self) -> None:
+        self.fake.config.behavior.vim_mode = False
+        self.fake.press("Escape")
+        self.assertEqual(self.fake.closed, 1)
+
+    # -- ':' prompt --------------------------------------------------------
+
+    def test_colon_opens_the_prompt(self) -> None:
+        self.assertTrue(self.fake.press("colon"))
+        self.assertTrue(self.fake._command.active)
+        self.assertTrue(self.fake._command_label.get_visible())
+        self.assertFalse(self.fake._hint.get_visible())
+        self.assertEqual(self.fake._command_label.text, ":▏")
+
+    def test_colon_q_enter_quits(self) -> None:
+        self.fake.press("colon")
+        self.fake.type_text("q")
+        self.assertEqual(self.fake._command_label.text, ":q▏")
+        self.fake.press("Return")
+        self.assertEqual(self.fake.closed, 1)
+        self.assertFalse(self.fake._command.active)
+        self.assertTrue(self.fake._hint.get_visible())
+
+    def test_escape_cancels_the_prompt_without_quitting(self) -> None:
+        self.fake.press("colon")
+        self.fake.type_text("q")
+        self.fake.press("Escape")
+        self.assertEqual(self.fake.closed, 0)
+        self.assertFalse(self.fake._command.active)
+        self.assertTrue(self.fake._hint.get_visible())
+
+    def test_an_unknown_command_does_not_quit(self) -> None:
+        self.fake.press("colon")
+        self.fake.type_text("wq")
+        self.fake.press("Return")
+        self.assertEqual(self.fake.closed, 0)
+
+    def test_backspace_on_an_empty_prompt_closes_it(self) -> None:
+        self.fake.press("colon")
+        self.fake.press("BackSpace")
+        self.assertFalse(self.fake._command.active)
+        self.assertTrue(self.fake._hint.get_visible())
+
+    def test_keys_do_not_navigate_while_the_prompt_is_open(self) -> None:
+        self.fake.press("colon")
+        self.fake.press("j")
+        self.assertEqual(self.fake.moves, [])
+        self.assertEqual(self.fake._command.text, "j")
 
 
 @unittest.skipUnless(GTK is not None, "GTK4/PyGObject is not installed")

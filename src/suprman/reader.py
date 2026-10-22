@@ -19,7 +19,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk, Pango
 
-from . import textsearch
+from . import textsearch, vimnav
 from .config import Config, hex_to_rgba
 from .textsearch import Span
 
@@ -99,9 +99,10 @@ class ReaderView(Gtk.Box):
         self._count = Gtk.Label(xalign=0.0)
         self._count.add_css_class("match-count")
         self._count.set_hexpand(True)
-        hint = Gtk.Label(
-            label="Enter next  ·  Shift+Enter previous  ·  ⌫ back  ·  Esc quit", xalign=1.0
-        )
+        hint_text = "Enter next  ·  Shift+Enter previous  ·  ⌫ back  ·  Esc quit"
+        if self.config.behavior.vim_mode:
+            hint_text = "j/k scroll  ·  h/l sideways  ·  / search  ·  ⌫ back  ·  Esc quit"
+        hint = Gtk.Label(label=hint_text, xalign=1.0)
         hint.add_css_class("footer")
         footer.append(self._count)
         footer.append(hint)
@@ -180,13 +181,88 @@ class ReaderView(Gtk.Box):
         self.set_part(PART_MAN, "MAN PAGE", blocks, order=20)
 
     def finish(self, message: str = "") -> None:
-        """Called once loading is done; moves focus to the search field."""
+        """Called once loading is done.
+
+        In vim mode the keyboard is already where it belongs (body on open,
+        filter if the user hit "/" while the page loaded), so a late render
+        must not yank it back.
+        """
         if message:
             self._count.set_text(message)
-        self.focus_search()
+        if not self.config.behavior.vim_mode:
+            self.focus_search()
 
     def focus_search(self) -> None:
+        """Insert mode: the in-page filter takes the keyboard."""
         self.search.grab_focus()
+
+    def focus_body(self) -> None:
+        """Normal mode: the document takes the keyboard, so j/k can scroll it."""
+        self._view.grab_focus()
+
+    def focus_default(self) -> None:
+        """Focus whatever this configuration expects after a page opens."""
+        if self.config.behavior.vim_mode:
+            self.focus_body()
+        else:
+            self.focus_search()
+
+    # -- vim scrolling -----------------------------------------------------
+
+    def scroll_lines(self, lines: float) -> None:
+        """Scroll the body by ``lines`` text lines (negative scrolls up)."""
+        self._scroll(self._scroller.get_vadjustment(), lines * self._line_height())
+
+    def scroll_columns(self, columns: float) -> None:
+        """Scroll sideways by ``columns`` characters (negative scrolls left)."""
+        self._scroll(self._scroller.get_hadjustment(), columns * self._column_width())
+
+    def scroll_pages(self, pages: float) -> None:
+        """Scroll by whole (or fractional, e.g. 0.5 for Ctrl-d) viewports."""
+        adjustment = self._scroller.get_vadjustment()
+        self._scroll(adjustment, adjustment.get_page_size() * pages)
+
+    def scroll_home(self) -> None:
+        adjustment = self._scroller.get_vadjustment()
+        adjustment.set_value(adjustment.get_lower())
+
+    def scroll_end(self) -> None:
+        adjustment = self._scroller.get_vadjustment()
+        adjustment.set_value(
+            vimnav.clamp_scroll(
+                adjustment.get_upper(),
+                adjustment.get_lower(),
+                adjustment.get_upper(),
+                adjustment.get_page_size(),
+            )
+        )
+
+    @staticmethod
+    def _scroll(adjustment: Gtk.Adjustment, delta: float) -> None:
+        adjustment.set_value(
+            vimnav.clamp_scroll(
+                adjustment.get_value() + delta,
+                adjustment.get_lower(),
+                adjustment.get_upper(),
+                adjustment.get_page_size(),
+            )
+        )
+
+    def _line_height(self) -> float:
+        """Height of one body line in pixels, so j moves by exactly one line."""
+        try:
+            _y, height = self._view.get_line_yrange(self._buffer.get_start_iter())
+        except (TypeError, ValueError):  # pragma: no cover - binding differences
+            return 18.0
+        return float(height) if height and height > 0 else 18.0
+
+    def _column_width(self) -> float:
+        """Width of one monospace character, for h/l horizontal steps."""
+        try:
+            width, _height = self._view.create_pango_layout("M").get_pixel_size()
+        except (AttributeError, TypeError):  # pragma: no cover - binding differences
+            return 8.0
+        return float(width) if width > 0 else 8.0
 
     def clear(self) -> None:
         self.begin("", "")
