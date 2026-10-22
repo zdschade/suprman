@@ -51,7 +51,7 @@ optional package is never required.
 ### From a checkout
 
 ```sh
-git clone https://github.com/suprman/suprman && cd suprman
+git clone https://github.com/zdschade/suprman && cd suprman
 ./install.sh --user          # ~/.local, no root
 # or
 sudo ./install.sh            # /usr/local
