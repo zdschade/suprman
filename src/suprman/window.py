@@ -26,11 +26,15 @@ from .timing import mark
 PAGE_LIST = "list"
 PAGE_READER = "reader"
 
-#: Rows built up front. Each one is a ListBoxRow plus three labels, and GTK
-#: styles every node, so building all `max_results` (200 by default) costs more
-#: than the rest of the window together. The rest is built on scroll.
-INITIAL_ROWS = 40
-ROWS_PER_SCROLL = 30
+#: Each row is a ListBoxRow plus three labels, and GTK shapes the text of every
+#: one at first paint, so building all `max_results` rows up front is the single
+#: biggest chunk of launch work. Only a screenful is built; the rest arrives as
+#: the list is scrolled.
+ROWS_PER_SCROLL = 20
+
+#: Roughly the vertical space taken by the search field, separator, footer and
+#: padding, used to guess how many rows fill the configured window.
+CHROME_HEIGHT = 130
 
 PLACEHOLDER = "search vim keybinds — try “delete line”, or type “man ls”"
 CHIP_VIM = "VIM KEYS"
@@ -119,6 +123,7 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         self.add_css_class("suprman")
         self.set_default_size(config.appearance.width, config.appearance.height)
 
+        self.keep_alive = False  # set by the app in --serve mode
         self.connect("close-request", self._on_close_request)
         self._build()
         self._install_controllers()
@@ -128,10 +133,13 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         mark("window built")
 
     def _on_close_request(self, window: Gtk.Window) -> bool:
-        """Stop worker results from touching widgets after the window is gone."""
+        """Hide in resident mode; destroy the window on a one-shot launch."""
+        self._generation += 1  # drop any in-flight page load either way
+        if self.keep_alive:
+            self.set_visible(False)
+            return True  # stop the default handler so the instance stays alive
         self._closing = True
-        self._generation += 1
-        return False  # let the default handler destroy the window
+        return False
 
     # -- construction ------------------------------------------------------
 
@@ -378,6 +386,16 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         reader.finish()
         return False
 
+    def reset(self) -> None:
+        """Return to a fresh popup: no query, no open page."""
+        if self._reader_visible():
+            self._close_reader()
+        elif self.search.get_text():
+            self.search.set_text("")
+        else:
+            self._refresh("")
+        self.search.grab_focus()
+
     def _close_reader(self) -> None:
         self._generation += 1  # invalidate in-flight loads
         self.stack.set_visible_child_name(PAGE_LIST)
@@ -388,6 +406,12 @@ class SuprmanWindow(Gtk.ApplicationWindow):
         return self.stack.get_visible_child_name() == PAGE_READER
 
     # -- rows --------------------------------------------------------------
+
+    def _initial_rows(self) -> int:
+        """A screenful of rows plus a little overscan, clamped to 12..40."""
+        appearance = self.config.appearance
+        visible = (appearance.height - CHROME_HEIGHT) // max(1, appearance.row_height)
+        return min(max(int(visible) + 4, 12), 40)
 
     def _set_rows(self, rows: list[RowData], empty_message: str, total: int | None = None) -> None:
         self._repopulating = True
@@ -405,7 +429,7 @@ class SuprmanWindow(Gtk.ApplicationWindow):
             self._empty_row.set_visible(not has_rows)
 
             if has_rows:
-                self._materialize(INITIAL_ROWS)
+                self._materialize(self._initial_rows())
                 self._select(0)
             else:
                 self._selected = -1

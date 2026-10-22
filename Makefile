@@ -42,6 +42,8 @@ install:
 	install -m 0755 bin/suprman $(DESTDIR)$(BINDIR)/suprman
 	install -d $(DESTDIR)$(DATADIR)/applications
 	install -m 0644 data/suprman.desktop $(DESTDIR)$(DATADIR)/applications/suprman.desktop
+	install -d $(DESTDIR)$(DATADIR)/systemd/user
+	install -m 0644 data/suprman.service $(DESTDIR)$(DATADIR)/systemd/user/suprman.service
 	# Precompile so even the first launch skips source parsing. The .pyc files
 	# stay valid when a packager moves DESTDIR into place.
 	$(PYTHON) -m compileall -q $(DESTDIR)$(LIBDIR) >/dev/null 2>&1 || true
@@ -51,6 +53,7 @@ uninstall:
 	rm -rf $(DESTDIR)$(LIBDIR)
 	rm -f $(DESTDIR)$(BINDIR)/suprman
 	rm -f $(DESTDIR)$(DATADIR)/applications/suprman.desktop
+	rm -f $(DESTDIR)$(DATADIR)/systemd/user/suprman.service
 
 # Source tarball for distro packagers; a changelog and licence are all a spec
 # or PKGBUILD needs on top of this.

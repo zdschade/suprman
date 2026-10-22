@@ -136,9 +136,10 @@ re-flowing man output at a different width is what turns it into ragged soup.
 | `⌫ Backspace`      | —                       | back to the list          |
 | `Esc`              | quit                    | quit                      |
 
-`Esc` closes the popup from anywhere. `Backspace` goes back one level: from a
-man page to the list it was opened from, as long as the in-page search box is
-empty (so it can still delete characters normally).
+`Esc` closes the popup from anywhere — or hides it when a resident instance is
+serving (see below). `Backspace` goes back one level: from a man page to the
+list it was opened from, as long as the in-page search box is empty (so it can
+still delete characters normally).
 
 Enter on a keybind row copies it to the clipboard, which is handy when you are
 about to paste it into a config file.
@@ -253,12 +254,53 @@ XWayland: `GDK_BACKEND=x11 suprman`. Under X11 there is no layer shell, so
 suprman is a normal undecorated window; use your WM's rules to hide the border
 and centre it.
 
-## Startup time
+## Instant opens: a resident instance
+
+A cold GTK start costs what it costs. Measured on a Fedora desktop:
+
+```
+imports done            430 ms   python + PyGObject + typelibs
+stylesheet applied      +186 ms   GTK init: display, theme, fonts
+window built             +28 ms   our widgets
+presented               +247 ms   first frame and compositor round trip
+```
+
+Nothing in the app can remove the first two thirds — that is the price of
+starting Python and GTK from scratch. What can be removed is doing it on every
+hotkey press:
+
+```sh
+suprman --serve     # stay resident with the window hidden
+```
+
+Then bind your hotkey to plain `suprman`. If a resident instance is running, the
+launch is a Unix socket write and an exit — **measured at ~35 ms** here — and
+that process never imports GTK at all. `Esc` hides the popup; the instance stays
+warm. `suprman --quit` stops it.
+
+Autostart it (either one):
+
+```sh
+# systemd user unit, installed with the package
+systemctl --user enable --now suprman
+
+# or a desktop autostart entry
+mkdir -p ~/.config/autostart
+printf '[Desktop Entry]\nType=Application\nName=suprman (resident)\nExec=suprman --serve\n' \
+  > ~/.config/autostart/suprman.desktop
+```
+
+This is opt-in on purpose: a resident instance holds roughly 80-120 MB of RSS,
+which is a real cost for a tool you may open twice a day. Without `--serve`
+everything still works, just at cold-start speed. If you use a compositor rule
+to blur `suprman`, keep it: hiding and showing reuses the same window.
+
+## Startup time (cold)
 
 The popup does as little as possible before it is on screen:
 
-- only the first 40 rows are built; the rest are created as you scroll
-  (`max_results` still caps the list)
+- only a screenful of rows (12-40, from the window height) is built; the rest
+  are created as you scroll (`max_results` still caps the list)
 - the reader's TextView and text buffer are built the first time you open a
   page, not at launch
 - `urllib` is imported only when a tldr page actually has to be downloaded
@@ -285,9 +327,10 @@ suprman: window built               243.9 ms  (+  73.7)
 suprman: presented                  251.0 ms  (+   7.1)
 ```
 
-Roughly a third of that is the Python interpreter and GTK typelibs, a third is
-GTK initialising the theme, and the rest is our own widgets — which is why the
-row count above matters.
+Roughly half of that is the Python interpreter and GTK typelibs and a third is
+GTK initialising the theme; our own widgets are the small remainder. That is why
+the answer to "it feels slow" is the resident instance above, not more
+micro-optimising of the window.
 
 ## Development
 

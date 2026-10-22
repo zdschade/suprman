@@ -163,8 +163,12 @@ scrollbar {
 
 scrollbar slider {
   background-color: rgba(255, 255, 255, 0.16);
+  border: none;
   border-radius: 4px;
-  min-width: 5px;
+  /* Adwaita's default slider has a 40px minimum plus margins; overriding the
+     minimum without clearing the margins makes GTK report a negative size. */
+  margin: 0;
+  min-width: 8px;
   min-height: 24px;
 }
 
@@ -173,7 +177,8 @@ scrollbar slider:hover {
 }
 
 scrollbar.vertical {
-  padding: 0 0 0 6px;
+  min-width: 10px;
+  padding: 0;
 }
 
 undershoot.top,

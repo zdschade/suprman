@@ -8,7 +8,12 @@ ever opened.
 
 from __future__ import annotations
 
+import os
+import time
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest import mock
 
 
 def load_gtk():
@@ -18,10 +23,10 @@ def load_gtk():
 
         gi.require_version("Gtk", "4.0")
         gi.require_version("Gdk", "4.0")
-        from gi.repository import Gdk, Gio, Gtk
+        from gi.repository import Gdk, Gio, GLib, Gtk
     except (ImportError, ValueError):  # pragma: no cover - environment dependent
         return None
-    return Gdk, Gio, Gtk
+    return Gdk, Gio, GLib, Gtk
 
 
 GTK = load_gtk()
@@ -36,7 +41,7 @@ def has_display() -> bool:
     """
     if GTK is None:
         return False
-    Gdk, _Gio, Gtk = GTK
+    Gdk, _Gio, _GLib, Gtk = GTK
     try:
         Gtk.init()
     except Exception:  # pragma: no cover - environment dependent
@@ -51,7 +56,7 @@ DISPLAY_AVAILABLE = has_display()
 class GtkSurfaceTest(unittest.TestCase):
     def setUp(self) -> None:
         assert GTK is not None  # narrowed for readers and type checkers
-        self.Gdk, self.Gio, self.Gtk = GTK
+        self.Gdk, self.Gio, self.GLib, self.Gtk = GTK
 
     def test_application_flags_live_in_gio(self) -> None:
         # Gtk.ApplicationFlags was a GTK3 thing; using it raises AttributeError
@@ -99,6 +104,79 @@ class GtkSurfaceTest(unittest.TestCase):
         reader.search.set_text("list")
         self.assertIn("directory", reader.text)
         self.assertIsInstance(reader, self.Gtk.Box)
+
+
+@unittest.skipUnless(GTK is not None, "GTK4/PyGObject is not installed")
+class ControlServerTest(unittest.TestCase):
+    """The resident-instance socket runs on Gio only, so no display is needed."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.runtime = Path(self._tmp.name)
+        patcher = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(self.runtime)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_commands_reach_the_callback(self) -> None:
+        from suprman import ipc
+        from suprman.server import ControlServer
+
+        received: list[str] = []
+        server = ControlServer(received.append)
+        self.addCleanup(server.stop)
+        self.assertTrue(server.start(), "server did not start")
+        self.assertTrue(server.running)
+
+        self.assertTrue(ipc.send("toggle"))
+        self.assertTrue(self._pump_until(lambda: received), "no command arrived")
+        self.assertEqual(received, ["toggle"])
+
+    def test_ping_is_not_forwarded(self) -> None:
+        from suprman import ipc
+        from suprman.server import ControlServer
+
+        received: list[str] = []
+        server = ControlServer(received.append)
+        self.addCleanup(server.stop)
+        self.assertTrue(server.start())
+
+        self.assertTrue(ipc.send("ping"))
+        self._pump_until(lambda: False, timeout=0.3)
+        self.assertEqual(received, [])
+
+    def test_second_server_refuses_and_leaves_the_first_running(self) -> None:
+        from suprman.server import ControlServer
+
+        first = ControlServer(lambda command: None)
+        self.addCleanup(first.stop)
+        self.assertTrue(first.start())
+        second = ControlServer(lambda command: None)
+        self.assertFalse(second.start())
+        self.assertTrue(first.running)
+
+    def test_stop_removes_the_socket(self) -> None:
+        from suprman import ipc
+        from suprman.server import ControlServer
+
+        server = ControlServer(lambda command: None)
+        self.assertTrue(server.start())
+        self.assertTrue(ipc.socket_path().exists())
+        server.stop()
+        self.assertFalse(ipc.socket_path().exists())
+
+    @staticmethod
+    def _pump_until(predicate, timeout: float = 2.0) -> bool:
+        """Run the default main context until ``predicate`` is true."""
+        context = GTK[2].MainContext.default()
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            while context.pending():
+                context.iteration(False)
+            if predicate():
+                return True
+            time.sleep(0.005)
+        return bool(predicate())
 
 
 if __name__ == "__main__":

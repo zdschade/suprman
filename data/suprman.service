@@ -1,0 +1,16 @@
+[Unit]
+Description=suprman resident popup
+Documentation=https://github.com/suprman/suprman
+# A GUI app: start it with the graphical session, not at boot.
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env suprman --serve
+# Restart if it dies, but do not hammer the session when a config is broken.
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

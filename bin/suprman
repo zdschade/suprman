@@ -26,6 +26,13 @@ for candidate in CANDIDATES:
 else:
     sys.exit("suprman: cannot find the suprman package; reinstall or set PYTHONPATH")
 
+# If a resident instance is running, this is a socket write and an exit --
+# no GTK import at all.
+from suprman import ipc
+
+if ipc.try_handoff(sys.argv):
+    sys.exit(0)
+
 from suprman.app import main
 
 if __name__ == "__main__":
