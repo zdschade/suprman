@@ -233,6 +233,52 @@ def load_index(
 
 _SAFE_NAME = re.compile(r"^[\w.+:@-]+$")
 
+#: Two or more spaces: man lays out its banners as columns.
+_COLUMNS = re.compile(r"\s{2,}")
+
+
+def _columns(line: str) -> list[str]:
+    return [part for part in _COLUMNS.split(line.strip()) if part]
+
+
+def _page_of(token: str) -> str:
+    """``LS(1)`` -> ``LS``, so banners can be matched against the page name."""
+    return token.split("(", 1)[0].strip().upper()
+
+
+def trim_banners(text: str, name: str) -> str:
+    """Drop the ``LS(1) ... LS(1)`` header and footer man prints.
+
+    They repeat what the reader header already says, and the footer date/version
+    line reads like stray output.
+    """
+    lines = text.splitlines()
+    while lines and not lines[0].strip():
+        lines.pop(0)
+
+    target = name.strip().upper()
+    if lines:
+        parts = _columns(lines[0])
+        if len(parts) >= 2 and _page_of(parts[0]) == target and _page_of(parts[-1]) == target:
+            lines.pop(0)
+            while lines and not lines[0].strip():
+                lines.pop(0)
+
+    # Up to two footer lines ("GNU coreutils 9.4   August 2024   LS(1)").
+    for _ in range(2):
+        if not lines:
+            break
+        parts = _columns(lines[-1])
+        last = parts[-1] if parts else ""
+        if len(parts) >= 2 and "(" in last and _page_of(last) == target:
+            lines.pop()
+            while lines and not lines[-1].strip():
+                lines.pop()
+        else:
+            break
+
+    return "\n".join(lines) + ("\n" if lines else "")
+
 
 def render_page(name: str, section: str = "", width: int = 100, timeout: float = 15.0) -> str:
     """Render a man page to plain text.
@@ -274,7 +320,7 @@ def render_page(name: str, section: str = "", width: int = 100, timeout: float =
         if not output.strip():
             detail = (result.stderr or "").strip().splitlines()
             raise ManError(detail[0] if detail else f"no man page for {name}")
-    return strip_overstrike(output)
+    return trim_banners(strip_overstrike(output), name)
 
 
 def available() -> bool:

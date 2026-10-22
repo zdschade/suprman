@@ -81,6 +81,29 @@ class RenderTest(unittest.TestCase):
         self.assertFalse(tldr.is_markdown("ls\n  List directory contents\n"))
 
 
+class PresentTest(unittest.TestCase):
+    """What the reader actually shows: no heading, no un-clickable link."""
+
+    def test_heading_and_links_are_dropped(self) -> None:
+        blocks = tldr.present(MARKDOWN)
+        styles = [style for style, _ in blocks]
+        self.assertNotIn(tldr.STYLE_TITLE, styles)
+        self.assertFalse(any(text.lower().startswith("more information") for _, text in blocks))
+        self.assertEqual(blocks[0], (tldr.STYLE_DESC, "List directory contents."))
+
+    def test_code_and_bullets_survive(self) -> None:
+        texts = [text for _, text in tldr.present(MARKDOWN)]
+        self.assertIn("ls -1", texts)
+        self.assertIn("List files one per line:", texts)
+
+    def test_no_leading_blank_lines(self) -> None:
+        blocks = tldr.present("# ls\n\n> does a thing.\n")
+        self.assertEqual(blocks[0], (tldr.STYLE_DESC, "does a thing."))
+
+    def test_empty_input(self) -> None:
+        self.assertEqual(tldr.present(""), [])
+
+
 class PlatformTest(unittest.TestCase):
     def test_auto_includes_common(self) -> None:
         platforms = tldr.candidate_platforms("auto")

@@ -47,6 +47,15 @@ entry.search > text > selection {
   background-color: $accent_soft;
 }
 
+/* The reader's in-page field is a filter, not the headline: body size, tight
+   padding, no giant 12pt title styling. */
+entry.search.reader-search {
+  font-family: $font_family;
+  font-size: ${font_size}pt;
+  font-weight: $font_weight;
+  padding: 0 2px 2px 2px;
+}
+
 /* Vertically centred against the search entry: no top margin, and a fixed
    line height so the padded box is symmetric. */
 .chip {
@@ -161,24 +170,45 @@ scrollbar {
   border: none;
 }
 
+/* Thin in both directions. The slider minimums are per-orientation: on the
+   horizontal bar min-height is the *thickness*, which is why a shared value
+   made it 24px tall. */
+scrollbar.vertical {
+  min-width: 8px;
+  padding: 0;
+}
+
+scrollbar.horizontal {
+  min-height: 8px;
+  padding: 0;
+}
+
+scrollbar trough {
+  background-color: transparent;
+  border: none;
+}
+
 scrollbar slider {
   background-color: rgba(255, 255, 255, 0.16);
   border: none;
   border-radius: 4px;
-  /* Adwaita's default slider has a 40px minimum plus margins; overriding the
-     minimum without clearing the margins makes GTK report a negative size. */
   margin: 0;
-  min-width: 8px;
+  min-width: 6px;
+  min-height: 6px;
+}
+
+scrollbar.vertical slider {
+  min-width: 6px;
   min-height: 24px;
 }
 
-scrollbar slider:hover {
-  background-color: rgba(255, 255, 255, 0.28);
+scrollbar.horizontal slider {
+  min-width: 24px;
+  min-height: 6px;
 }
 
-scrollbar.vertical {
-  min-width: 10px;
-  padding: 0;
+scrollbar slider:hover {
+  background-color: rgba(255, 255, 255, 0.3);
 }
 
 undershoot.top,

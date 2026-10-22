@@ -86,6 +86,28 @@ def render(markdown: str) -> list[tuple[str, str]]:
     return lines
 
 
+def present(markdown: str) -> list[tuple[str, str]]:
+    """Display-ready blocks: drops the heading and the "More information" link.
+
+    The reader header already shows the command and its section, the link is not
+    clickable, and both are noise in a popup.
+    """
+    blocks = render(markdown)
+    while blocks and blocks[0] == (STYLE_TEXT, ""):
+        blocks.pop(0)
+    if blocks and blocks[0][0] == STYLE_TITLE:
+        blocks.pop(0)
+    blocks = [
+        block
+        for block in blocks
+        if not block[1].lower().startswith("more information")
+        and block[1].lower() != "more information: <https://tldr.sh>"
+    ]
+    while blocks and blocks[0] == (STYLE_TEXT, ""):
+        blocks.pop(0)
+    return blocks
+
+
 class Tldr:
     """Fetches tldr pages, from disk, client or network."""
 

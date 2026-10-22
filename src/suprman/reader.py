@@ -43,7 +43,7 @@ class ReaderView(Gtk.Box):
     """Scrollable document with an always-visible search field."""
 
     def __init__(self, config: Config) -> None:
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.config = config
         self._parts: dict[str, Part] = {}
         self._spans: list[Span] = []
@@ -55,7 +55,7 @@ class ReaderView(Gtk.Box):
     # -- construction ------------------------------------------------------
 
     def _build(self) -> None:
-        header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         self._title = Gtk.Label(xalign=0.0)
         self._title.add_css_class("reader-title")
         self._subtitle = Gtk.Label(xalign=0.0)
@@ -66,6 +66,7 @@ class ReaderView(Gtk.Box):
 
         self.search = Gtk.SearchEntry()
         self.search.set_placeholder_text("search in page")
+        self.search.add_css_class("reader-search")
         self.search.set_hexpand(True)
         self.search.connect("search-changed", self._on_search_changed)
         self.append(self.search)
@@ -113,13 +114,28 @@ class ReaderView(Gtk.Box):
         buffer = self._buffer
 
         buffer.create_tag("h1", weight=Pango.Weight.BOLD, size=13 * Pango.SCALE, foreground=accent)
+        # Part labels ("TLDR · tldr.sh", "MAN PAGE") act as dividers.
         buffer.create_tag(
-            "section", weight=Pango.Weight.BOLD, size=9 * Pango.SCALE, foreground=muted
+            "section",
+            weight=Pango.Weight.BOLD,
+            size=9 * Pango.SCALE,
+            foreground=muted,
+            pixels_above_lines=14,
+            pixels_below_lines=4,
         )
         buffer.create_tag("desc", style=Pango.Style.ITALIC, foreground=muted)
-        buffer.create_tag("bullet", weight=Pango.Weight.BOLD, foreground=accent)
+        buffer.create_tag(
+            "bullet", weight=Pango.Weight.BOLD, foreground=accent, pixels_above_lines=4
+        )
         buffer.create_tag("code", family="Monospace", foreground=appearance.foreground)
-        buffer.create_tag("header", weight=Pango.Weight.BOLD, foreground=accent)
+        # Man page section headings: accent, bold, with air above them.
+        buffer.create_tag(
+            "header",
+            weight=Pango.Weight.BOLD,
+            foreground=accent,
+            pixels_above_lines=12,
+            pixels_below_lines=3,
+        )
         buffer.create_tag("body", foreground=appearance.foreground)
 
         # Search hits: a soft tag for every match, a solid one for the active hit.

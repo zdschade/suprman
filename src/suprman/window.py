@@ -346,7 +346,7 @@ class SuprmanWindow(Gtk.ApplicationWindow):
 
     def _worker_tldr(self, generation: int, page: manpages.ManPage) -> None:
         markdown = self._tldr.fetch(page.name)
-        blocks: list[Block] = tldr.render(markdown) if markdown else []
+        blocks: list[Block] = tldr.present(markdown) if markdown else []
         GLib.idle_add(self._show_tldr, generation, blocks)
 
     def _show_tldr(self, generation: int, blocks: list[Block]) -> bool:

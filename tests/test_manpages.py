@@ -113,6 +113,41 @@ class ManpathFallbackTest(unittest.TestCase):
         self.assertEqual(manpages._parse_manpath_output("/nonexistent/man"), [])
 
 
+class BannerTest(unittest.TestCase):
+    PAGE = (
+        "LS(1)                          User Commands                          LS(1)\n"
+        "\n"
+        "NAME\n"
+        "       ls - list directory contents\n"
+        "\n"
+        "SYNOPSIS\n"
+        "       ls [OPTION]... [FILE]...\n"
+        "\n"
+        "GNU coreutils 9.4               August 2024                        LS(1)\n"
+    )
+
+    def test_header_and_footer_banners_are_removed(self) -> None:
+        trimmed = manpages.trim_banners(self.PAGE, "ls")
+        self.assertTrue(trimmed.startswith("NAME\n"), trimmed[:40])
+        self.assertIn("SYNOPSIS", trimmed)
+        self.assertNotIn("User Commands", trimmed)
+        self.assertNotIn("August 2024", trimmed)
+        self.assertTrue(trimmed.endswith("ls [OPTION]... [FILE]...\n"))
+
+    def test_body_that_mentions_other_pages_is_kept(self) -> None:
+        page = "NAME\n       x - thing\n\nSEE ALSO\n       bash(1), sh(1)\n"
+        self.assertEqual(manpages.trim_banners(page, "x"), page)
+
+    def test_page_without_banners_is_unchanged(self) -> None:
+        page = "NAME\n       x - thing\n"
+        self.assertEqual(manpages.trim_banners(page, "x"), page)
+
+    def test_other_pages_banner_is_not_removed(self) -> None:
+        page = "LS(1)          User Commands          LS(1)\nNAME\n       ls\n"
+        # Asked to trim "grep", nothing matches and the text survives.
+        self.assertTrue(manpages.trim_banners(page, "grep").startswith("LS(1)"))
+
+
 class CacheTest(unittest.TestCase):
     PAGES = [
         manpages.ManPage("ls", "1", "list directory contents"),
@@ -168,6 +203,9 @@ class RenderTest(unittest.TestCase):
     def test_renders_a_real_page(self) -> None:
         text = manpages.render_page("ls", "1", width=90)
         self.assertIn("NAME", text)
+        # The banner lines are gone: the page starts at its first heading.
+        self.assertTrue(text.startswith("NAME"), text[:60])
+        self.assertNotIn("User Commands", text)
         self.assertIn("ls", text)
         self.assertNotIn("\b", text)
         self.assertGreater(len(text), 500)

@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 import unittest
+import warnings
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
@@ -118,6 +119,12 @@ class SpawnTest(unittest.TestCase):
         patcher = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(self.runtime)})
         patcher.start()
         self.addCleanup(patcher.stop)
+        # The spawned children are fire-and-forget by design; silence the
+        # "subprocess is still running" warnings they leave in the test process.
+        self._warnings = warnings.catch_warnings()
+        self._warnings.__enter__()
+        warnings.simplefilter("ignore", ResourceWarning)
+        self.addCleanup(self._warnings.__exit__, None, None, None)
         # spawn_server() inspects sys.argv[0]; point it at a stand-in launcher.
         self.marker = self.runtime / "spawned.txt"
         self.launcher = self.runtime / "fake-launcher"
