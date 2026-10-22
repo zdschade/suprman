@@ -24,7 +24,11 @@ test:
 	PYTHONPATH=src $(PYTHON) -m unittest discover -s tests -t . -v
 
 lint:
-	@if command -v ruff >/dev/null 2>&1; then ruff check src tests; \
+	@if command -v ruff >/dev/null 2>&1; then \
+		ruff check src tests bin/suprman && ruff format --check src tests bin/suprman; \
+	elif $(PYTHON) -m ruff --version >/dev/null 2>&1; then \
+		$(PYTHON) -m ruff check src tests bin/suprman && \
+		$(PYTHON) -m ruff format --check src tests bin/suprman; \
 	else echo "ruff not installed, skipping"; fi
 
 check:

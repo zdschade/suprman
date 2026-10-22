@@ -349,6 +349,9 @@ micro-optimising of the window.
 
 ## Development
 
+Agent-facing notes — repo map, invariants, headless verification recipe, pitfalls — are in
+[AGENTS.md](AGENTS.md).
+
 ```sh
 make run        # run from the checkout (PYTHONPATH=src)
 make test       # unit tests, no display needed
